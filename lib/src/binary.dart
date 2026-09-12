@@ -1,6 +1,7 @@
 import 'dart:typed_data';
 
 import 'package:pscore/src/exceptions.dart';
+import 'package:pscore/src/int64.dart';
 
 /// Bounds-checked big-endian input used by Photoshop format parsers.
 final class PsBinaryReader {
@@ -70,17 +71,31 @@ final class PsBinaryReader {
   }
 
   /// Reads an unsigned 64-bit integer.
+  ///
+  /// Compiled to JavaScript, a value above [psMaxExactInteger] cannot be held
+  /// exactly and raises a [PsFormatException] instead of losing its low bits.
+  /// Native and WebAssembly targets read the full 64-bit range.
   int readUint64() {
     _require(8);
-    final int value = _data.getUint64(_offset);
+    final int? value = psGetUint64(_data, _offset);
+    if (value == null) {
+      throw PsFormatException(message: _inexactMessage, source: bytes, offset: baseOffset + _offset);
+    }
     _offset += 8;
     return value;
   }
 
   /// Reads a signed 64-bit integer.
+  ///
+  /// Compiled to JavaScript, a value outside the exactly representable range
+  /// raises a [PsFormatException] instead of losing its low bits. Native and
+  /// WebAssembly targets read the full 64-bit range.
   int readInt64() {
     _require(8);
-    final int value = _data.getInt64(_offset);
+    final int? value = psGetInt64(_data, _offset);
+    if (value == null) {
+      throw PsFormatException(message: _inexactMessage, source: bytes, offset: baseOffset + _offset);
+    }
     _offset += 8;
     return value;
   }
@@ -148,6 +163,9 @@ final class PsBinaryReader {
     }
     return value;
   }
+
+  /// Explains a 64-bit value the current platform cannot hold exactly.
+  static const String _inexactMessage = 'This platform represents integers only up to $psMaxExactInteger, and the stored 64-bit value is outside that range';
 
   /// Ensures that [length] bytes remain before a read or skip.
   void _require(int length) {
@@ -223,16 +241,27 @@ final class PsBinaryWriter {
   }
 
   /// Writes an unsigned 64-bit integer.
+  ///
+  /// Compiled to JavaScript, a value above [psMaxExactInteger] cannot be held
+  /// exactly and raises a [PsWriteException] instead of writing truncated bytes.
+  /// A negative value stores its low 64 bits, as `ByteData` does.
   void writeUint64(int value) {
     _reserve(8);
-    _data.setUint64(_length, value);
+    if (!psSetUint64(_data, _length, value)) {
+      throw PsWriteException(message: 'Cannot write $value as an unsigned 64-bit field: $_inexactWriteMessage');
+    }
     _length += 8;
   }
 
   /// Writes a signed 64-bit integer.
+  ///
+  /// Compiled to JavaScript, a value outside the exactly representable range
+  /// raises a [PsWriteException] instead of writing truncated bytes.
   void writeInt64(int value) {
     _reserve(8);
-    _data.setInt64(_length, value);
+    if (!psSetInt64(_data, _length, value)) {
+      throw PsWriteException(message: 'Cannot write $value as a signed 64-bit field: $_inexactWriteMessage');
+    }
     _length += 8;
   }
 
@@ -305,6 +334,9 @@ final class PsBinaryWriter {
     _length = 0;
     return result;
   }
+
+  /// Explains the exact-integer range of the current platform.
+  static const String _inexactWriteMessage = 'this platform represents integers only from $psMinExactInteger to $psMaxExactInteger';
 
   /// Ensures the buffer can hold [count] more bytes, growing it geometrically.
   void _reserve(int count) {

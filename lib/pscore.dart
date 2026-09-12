@@ -5,6 +5,7 @@ export 'src/binary.dart';
 export 'src/descriptor.dart';
 export 'src/descriptor_access.dart';
 export 'src/exceptions.dart';
+export 'src/int64.dart' show psMaxExactInteger, psMinExactInteger;
 export 'src/pack_bits.dart';
 export 'src/path.dart';
 export 'src/pattern.dart';

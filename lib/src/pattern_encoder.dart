@@ -381,7 +381,13 @@ abstract final class PsPatternRecordEncoder {
 
   /// Requires [value] to fit an unsigned integer field.
   static void _requireUnsigned(int value, int bits, String label) {
-    final int maximum = (1 << bits) - 1;
+    // Tabulated rather than shifted, because `1 << 32` is zero on the web.
+    final int maximum = switch (bits) {
+      8 => 0xff,
+      16 => 0xffff,
+      32 => 0xffffffff,
+      _ => throw ArgumentError.value(bits, 'bits', 'Unsupported unsigned field width'),
+    };
     if (value < 0 || value > maximum) {
       throw PsWriteException(message: '$label value $value does not fit an unsigned $bits-bit field');
     }
@@ -389,9 +395,12 @@ abstract final class PsPatternRecordEncoder {
 
   /// Requires [value] to fit a signed integer field.
   static void _requireSigned(int value, int bits, String label) {
-    final int minimum = -(1 << (bits - 1));
-    final int maximum = (1 << (bits - 1)) - 1;
-    if (value < minimum || value > maximum) {
+    final ({int minimum, int maximum}) range = switch (bits) {
+      16 => (minimum: -0x8000, maximum: 0x7fff),
+      32 => (minimum: -0x80000000, maximum: 0x7fffffff),
+      _ => throw ArgumentError.value(bits, 'bits', 'Unsupported signed field width'),
+    };
+    if (value < range.minimum || value > range.maximum) {
       throw PsWriteException(message: '$label value $value does not fit a signed $bits-bit field');
     }
   }

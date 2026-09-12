@@ -2,6 +2,7 @@ import 'dart:typed_data';
 
 import 'package:pscore/src/binary.dart';
 import 'package:pscore/src/exceptions.dart';
+import 'package:pscore/src/int64.dart';
 
 /// Determines whether one Photoshop tagged block uses a 64-bit length.
 typedef PsTaggedBlockWideLengthResolver = bool Function(String signature, String key);
@@ -105,11 +106,15 @@ abstract final class PsTaggedBlockCodec {
   );
 
   /// Reads one tagged-block header and leaves [reader] at its payload.
+  ///
+  /// [maxPayloadBytes] defaults to the largest integer the platform represents
+  /// exactly, which imposes no practical limit of its own; a bounded caller
+  /// should pass its own budget.
   static PsTaggedBlockHeader readHeader(
     PsBinaryReader reader, {
     Set<String> signatures = standardSignatures,
     PsTaggedBlockWideLengthResolver wideLengthResolver = _wideBySignature,
-    int maxPayloadBytes = 0x7fffffffffffffff,
+    int maxPayloadBytes = psMaxExactInteger,
   }) {
     final int offset = reader.baseOffset + reader.offset;
     final String signature = reader.readString(4);
@@ -197,7 +202,7 @@ abstract final class PsTaggedBlockCodec {
     _requireFourCharacters(block.key, 'Tagged-block key');
     final bool wide = wideLengthResolver(block.signature, block.key);
     final int length = preserveDeclaredLength ? block.declaredLength : block.data.length;
-    final int maximum = wide ? 0x7fffffffffffffff : 0xffffffff;
+    final int maximum = wide ? psMaxExactInteger : 0xffffffff;
     if (length < 0 || length > maximum) {
       throw PsWriteException(
         message: 'Tagged block ${block.key} length $length does not fit its ${wide ? 64 : 32}-bit field',

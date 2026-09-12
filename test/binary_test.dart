@@ -46,5 +46,52 @@ void main() {
 
       check(reader.readUint16).throws<PsFormatException>();
     });
+
+    test('round-trips the whole exactly representable 64-bit range', () {
+      // The web has no 64-bit integers, so its range is narrower. Driving the
+      // expectations from the advertised bounds keeps this test honest on both.
+      final List<int> values = <int>[0, 1, -1, 0xffffffff, -0x100000000, psMaxExactInteger, psMinExactInteger];
+      final PsBinaryWriter writer = PsBinaryWriter();
+      values.forEach(writer.writeInt64);
+
+      final PsBinaryReader reader = PsBinaryReader(bytes: writer.takeBytes());
+      final List<int> decoded = <int>[for (int index = 0; index < values.length; index++) reader.readInt64()];
+
+      check(decoded).deepEquals(values);
+      check(reader.isAtEnd).isTrue();
+    });
+
+    test('stores a negative 64-bit value in two-s complement order', () {
+      const List<int> allOnes = <int>[255, 255, 255, 255, 255, 255, 255, 255];
+
+      check((PsBinaryWriter()..writeInt64(-1)).takeBytes()).deepEquals(allOnes);
+      // The unsigned accessor stores the low 64 bits, as `ByteData` does.
+      check((PsBinaryWriter()..writeUint64(-1)).takeBytes()).deepEquals(allOnes);
+      check(PsBinaryReader(bytes: Uint8List.fromList(allOnes)).readInt64()).equals(-1);
+    });
+
+    test('reports a stored 64-bit value the platform cannot hold exactly', () {
+      // Two to the power of 54, which is beyond the web's exact integer range
+      // but an ordinary value where 64-bit integers are native.
+      final Uint8List bytes = Uint8List(8)..[1] = 0x40;
+      final PsBinaryReader reader = PsBinaryReader(bytes: bytes);
+
+      if (psMaxExactInteger > 0x1fffffffffffff) {
+        check(reader.readInt64()).equals(0x40000000000000);
+      } else {
+        check(reader.readInt64).throws<PsFormatException>();
+      }
+    });
+
+    test('refuses to write a 64-bit value the platform cannot hold exactly', () {
+      if (psMaxExactInteger > 0x1fffffffffffff) {
+        // Nothing fits a 64-bit field without fitting a native 64-bit integer.
+        return;
+      }
+      final PsBinaryWriter writer = PsBinaryWriter();
+
+      check(() => writer.writeInt64(psMaxExactInteger + 2)).throws<PsWriteException>();
+      check(() => writer.writeUint64(psMaxExactInteger + 2)).throws<PsWriteException>();
+    });
   });
 }

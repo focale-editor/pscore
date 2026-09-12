@@ -14,6 +14,22 @@ The package currently provides:
 - profile-independent RGBA previews for standard Photoshop color modes;
 - shared format and write exceptions with byte offsets.
 
+## Platform support
+
+The package is pure Dart and runs on native platforms, WebAssembly, and
+JavaScript.
+
+Only the JavaScript target needs a compromise: it has no 64-bit integers, and its
+`ByteData` 64-bit accessors are unavailable. There, `PsCore` composes each 64-bit
+field from two 32-bit halves, which is exact up to `psMaxExactInteger`, or two to
+the power of 53 minus one. That covers every 64-bit field real Photoshop data
+contains, since a larger `8B64` block length or `comp` descriptor value would
+describe petabytes. Beyond it, reading raises a `PsFormatException` and writing a
+`PsWriteException`, rather than silently dropping the low bits.
+
+Native and WebAssembly targets both use the platform's own 64-bit accessors and
+produce byte-identical output over the full signed 64-bit range.
+
 ## Usage
 
 ```dart
