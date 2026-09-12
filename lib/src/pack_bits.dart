@@ -44,14 +44,32 @@ abstract final class PsPackBitsCodec {
     return output;
   }
 
+  /// Returns the largest encoding a row of [rowBytes] can produce.
+  ///
+  /// Incompressible data costs one control byte per 128 literal bytes, so this
+  /// bound lets a caller size one buffer up front instead of growing it.
+  static int maxEncodedLength(int rowBytes) => rowBytes + (rowBytes + 127) ~/ 128 + 1;
+
   /// Encodes one [row] with the PackBits run-length algorithm.
   static Uint8List encodeRow(Uint8List row) {
-    final BytesBuilder output = BytesBuilder(copy: false);
+    final Uint8List output = Uint8List(maxEncodedLength(row.length));
+    return Uint8List.sublistView(output, 0, encodeRowInto(row, output, 0));
+  }
+
+  /// Encodes [row] into [output] at [start] and returns the next write offset.
+  ///
+  /// [output] must have at least [maxEncodedLength] bytes available beyond
+  /// [start]. Writing into a caller-owned buffer lets a whole image be encoded
+  /// without allocating per row or per run, which dominates the cost of
+  /// compressing large planes.
+  static int encodeRowInto(Uint8List row, Uint8List output, int start) {
+    int write = start;
     int offset = 0;
     while (offset < row.length) {
       int runLength = _repeatedRunLength(row, offset);
       if (runLength >= 3) {
-        output.add(<int>[257 - runLength, row[offset]]);
+        output[write++] = 257 - runLength;
+        output[write++] = row[offset];
         offset += runLength;
         continue;
       }
@@ -67,11 +85,11 @@ abstract final class PsPackBitsCodec {
         offset += runLength.clamp(1, remaining);
       }
       final int literalLength = offset - literalStart;
-      output
-        ..add(<int>[literalLength - 1])
-        ..add(Uint8List.sublistView(row, literalStart, offset));
+      output[write++] = literalLength - 1;
+      output.setRange(write, write + literalLength, row, literalStart);
+      write += literalLength;
     }
-    return output.takeBytes();
+    return write;
   }
 
   /// Returns the repeated run at [offset], capped to PackBits' maximum.

@@ -23,6 +23,35 @@ void main() {
       expect(decoded, orderedEquals(source));
     });
 
+    test('bounds the output buffer for incompressible rows', () {
+      // Rows where no byte repeats produce the worst case: one control byte
+      // per 128 literal bytes. An undersized bound would fail here instead of
+      // in a caller that preallocates from it.
+      for (final int rowBytes in <int>[0, 1, 2, 127, 128, 129, 255, 256, 257, 4096]) {
+        final Uint8List row = Uint8List.fromList(<int>[
+          for (int index = 0; index < rowBytes; index++) (index * 7 + index ~/ 128) & 0xff,
+        ]);
+
+        final Uint8List encoded = PsPackBitsCodec.encodeRow(row);
+
+        expect(encoded.length, lessThanOrEqualTo(PsPackBitsCodec.maxEncodedLength(rowBytes)), reason: 'row of $rowBytes bytes');
+        expect(PsPackBitsCodec.decodeRow(encoded, decodedLength: rowBytes), orderedEquals(row), reason: 'row of $rowBytes bytes');
+      }
+    });
+
+    test('encodes into a caller-owned buffer at an offset', () {
+      final Uint8List first = Uint8List.fromList(<int>[1, 1, 1, 1, 2, 3]);
+      final Uint8List second = Uint8List.fromList(<int>[4, 5, 5, 5, 5, 6]);
+      final Uint8List buffer = Uint8List(PsPackBitsCodec.maxEncodedLength(first.length) + PsPackBitsCodec.maxEncodedLength(second.length));
+
+      final int afterFirst = PsPackBitsCodec.encodeRowInto(first, buffer, 0);
+      final int afterSecond = PsPackBitsCodec.encodeRowInto(second, buffer, afterFirst);
+
+      expect(Uint8List.sublistView(buffer, 0, afterFirst), orderedEquals(PsPackBitsCodec.encodeRow(first)));
+      expect(Uint8List.sublistView(buffer, afterFirst, afterSecond), orderedEquals(PsPackBitsCodec.encodeRow(second)));
+      expect(PsPackBitsCodec.decodeRow(Uint8List.sublistView(buffer, afterFirst, afterSecond), decodedLength: second.length), orderedEquals(second));
+    });
+
     test('accepts the PackBits no-op marker', () {
       final Uint8List decoded = PsPackBitsCodec.decodeRow(
         Uint8List.fromList(<int>[128, 0, 42]),
