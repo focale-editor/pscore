@@ -1,5 +1,11 @@
 # 📰 PsCore changelog
 
+## v0.1.4
+Released on September 12, 2026.
+
+* **FEAT**: Added pattern record and block encoders. ([#a10e7bb](https://github.com/focale-editor/pscore/commit/a10e7bb))
+* **FEAT**: Added web platform support for 64-bit integer operations. ([#bf9a5de](https://github.com/focale-editor/pscore/commit/bf9a5de))
+
 ## v0.1.3
 Released on September 12, 2026.
 
