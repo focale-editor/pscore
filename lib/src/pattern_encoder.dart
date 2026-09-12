@@ -39,6 +39,9 @@ abstract final class PsPatternRecordEncoder {
   /// Number of bytes in an indexed RGB palette.
   static const int _paletteBytes = 256 * 3;
 
+  /// Number of bytes preceding one channel's encoded payload.
+  static const int _channelHeaderBytes = 23;
+
   /// Encodes [pattern] without an outer record length or alignment.
   static Uint8List encode({
     required PsPattern pattern,
@@ -64,11 +67,14 @@ abstract final class PsPatternRecordEncoder {
     }
     final Uint8List virtualMemoryData = virtualMemory.takeBytes();
 
-    final PsBinaryWriter writer = PsBinaryWriter()
-      ..writeUint32(pattern.version)
-      ..writeUint32(pattern.colorModeCode)
-      ..writeInt16(pattern.vertical)
-      ..writeInt16(pattern.horizontal);
+    final PsBinaryWriter writer =
+        PsBinaryWriter(
+            initialCapacity: virtualMemoryData.length + pattern.recordTrailingData.length + (pattern.palette?.length ?? 0) + pattern.name.length * 2 + 64,
+          )
+          ..writeUint32(pattern.version)
+          ..writeUint32(pattern.colorModeCode)
+          ..writeInt16(pattern.vertical)
+          ..writeInt16(pattern.horizontal);
     _writeUnicodeString(
       writer,
       pattern.name,
@@ -130,14 +136,34 @@ abstract final class PsPatternRecordEncoder {
     if (!slot.isWritten) {
       return;
     }
-    final Uint8List data = _slotData(slot, options);
+    final ({Uint8List data, bool verbatim}) payload = _slotData(slot, options);
     writer
-      ..writeUint32(options.mode == PsPatternEncodeMode.permissive ? slot.declaredLength ?? data.length : data.length)
-      ..writeBytes(data);
+      ..writeUint32(_declaredSlotLength(slot, payload, options))
+      ..writeBytes(payload.data);
+  }
+
+  /// Returns the length field that describes the bytes actually emitted.
+  ///
+  /// A preserved declared length is only reproduced for a payload copied
+  /// verbatim, which is how a truncated source record round-trips. A rebuilt
+  /// payload always declares its own length, because recompression can change
+  /// the byte count and a stale length would desynchronize every later slot.
+  static int _declaredSlotLength(
+    PsPatternChannelSlot slot,
+    ({Uint8List data, bool verbatim}) payload,
+    PsPatternEncodeOptions options,
+  ) {
+    if (options.mode != PsPatternEncodeMode.permissive || !payload.verbatim) {
+      return payload.data.length;
+    }
+    return slot.declaredLength ?? payload.data.length;
   }
 
   /// Rebuilds a parsed channel or falls back to its complete opaque payload.
-  static Uint8List _slotData(
+  ///
+  /// The `verbatim` field reports whether the returned bytes are the preserved
+  /// source payload rather than a re-encoded one.
+  static ({Uint8List data, bool verbatim}) _slotData(
     PsPatternChannelSlot slot,
     PsPatternEncodeOptions options,
   ) {
@@ -146,19 +172,21 @@ abstract final class PsPatternRecordEncoder {
       if (slot.data.isEmpty && slot.declaredLength != 0) {
         throw PsWriteException(message: 'Pattern slot ${slot.index} has no channel or preserved payload');
       }
-      return slot.data;
+      return (data: slot.data, verbatim: true);
     }
     final Uint8List encodedSamples = _encodedSamples(channel, slot, options);
-    return (PsBinaryWriter()
-          ..writeUint32(channel.primaryDepth)
-          ..writeInt32(channel.bounds.top)
-          ..writeInt32(channel.bounds.left)
-          ..writeInt32(channel.bounds.bottom)
-          ..writeInt32(channel.bounds.right)
-          ..writeUint16(channel.depth)
-          ..writeUint8(channel.compressionCode)
-          ..writeBytes(encodedSamples))
-        .takeBytes();
+    final Uint8List data =
+        (PsBinaryWriter(initialCapacity: _channelHeaderBytes + encodedSamples.length)
+              ..writeUint32(channel.primaryDepth)
+              ..writeInt32(channel.bounds.top)
+              ..writeInt32(channel.bounds.left)
+              ..writeInt32(channel.bounds.bottom)
+              ..writeInt32(channel.bounds.right)
+              ..writeUint16(channel.depth)
+              ..writeUint8(channel.compressionCode)
+              ..writeBytes(encodedSamples))
+            .takeBytes();
+    return (data: data, verbatim: false);
   }
 
   /// Encodes decoded samples with their selected compression or reuses source bytes.
@@ -172,8 +200,8 @@ abstract final class PsPatternRecordEncoder {
       if (channel.encodedData.isNotEmpty || channel.bounds.pixelCount == 0) {
         return channel.encodedData;
       }
-      if (slot.data.length >= 23) {
-        return Uint8List.sublistView(slot.data, 23);
+      if (slot.data.length >= _channelHeaderBytes) {
+        return Uint8List.sublistView(slot.data, _channelHeaderBytes);
       }
       throw PsWriteException(message: 'Pattern slot ${slot.index} has no encoded or decoded sample data');
     }
@@ -189,19 +217,13 @@ abstract final class PsPatternRecordEncoder {
       case PsPatternCompression.raw:
         writer.writeBytes(decodedData);
       case PsPatternCompression.packBits:
-        final List<Uint8List> rows = <Uint8List>[
-          for (int row = 0; row < channel.bounds.height; row++)
-            PsPackBitsCodec.encodeRow(
-              Uint8List.sublistView(decodedData, row * rowBytes, (row + 1) * rowBytes),
-            ),
-        ];
-        for (final Uint8List row in rows) {
-          if (row.length > 0xffff) {
-            throw PsWriteException(message: 'Pattern slot ${slot.index} has a PackBits row exceeding the 16-bit length capacity');
-          }
-          writer.writeUint16(row.length);
-        }
-        rows.forEach(writer.writeBytes);
+        writer.writeBytes(
+          PsPackBitsCodec.encodeRows(
+            decodedData,
+            rowBytes: rowBytes,
+            rowCount: channel.bounds.height,
+          ),
+        );
       case PsPatternCompression.unknown:
         if (options.mode == PsPatternEncodeMode.strict) {
           throw PsWriteException(message: 'Pattern slot ${slot.index} uses unknown compression ${channel.compressionCode}');
@@ -221,9 +243,13 @@ abstract final class PsPatternRecordEncoder {
     String value, {
     required bool terminate,
   }) {
-    final List<int> codeUnits = <int>[...value.codeUnits, if (terminate) 0];
-    writer.writeUint32(codeUnits.length);
-    codeUnits.forEach(writer.writeUint16);
+    final List<int> codeUnits = value.codeUnits;
+    writer
+      ..writeUint32(codeUnits.length + (terminate ? 1 : 0))
+      ..writeUint16List(codeUnits);
+    if (terminate) {
+      writer.writeUint16(0);
+    }
   }
 
   /// Checks that all emitted numeric and byte fields are representable.

@@ -522,30 +522,24 @@ abstract final class PsPatternRecordDecoder {
         trailingData: Uint8List.sublistView(encodedData, expectedBytes),
       );
     }
-    final PsBinaryReader compressed = PsBinaryReader(bytes: encodedData, baseOffset: encodedOffset);
-    if (compressed.remaining < height * 2) {
+    if (encodedData.length < height * 2) {
       _issue(onIssue, 'Pattern PackBits row-length table is truncated', encodedOffset);
       return (decodedData: null, trailingData: Uint8List(0));
     }
-    final List<int> rowLengths = <int>[
-      for (int row = 0; row < height; row++) compressed.readUint16(),
-    ];
-    final Uint8List output = Uint8List(expectedBytes);
     try {
-      for (int row = 0; row < height; row++) {
-        final int rowLength = rowLengths[row];
-        final Uint8List encodedRow = compressed.readBytes(rowLength);
-        final Uint8List decodedRow = PsPackBitsCodec.decodeRow(encodedRow, decodedLength: rowBytes);
-        output.setRange(row * rowBytes, (row + 1) * rowBytes, decodedRow);
-      }
+      final ({Uint8List data, int bytesRead}) decoded = PsPackBitsCodec.decodeRowsPrefix(
+        encodedData,
+        rowBytes: rowBytes,
+        rowCount: height,
+      );
+      return (
+        decodedData: decoded.data,
+        trailingData: Uint8List.sublistView(encodedData, decoded.bytesRead),
+      );
     } on PsFormatException catch (error) {
       _issue(onIssue, 'Pattern PackBits data could not be decoded: ${error.message}', error.offset ?? encodedOffset);
       return (decodedData: null, trailingData: Uint8List(0));
     }
-    return (
-      decodedData: output,
-      trailingData: compressed.readBytes(compressed.remaining),
-    );
   }
 
   /// Reads one signed Photoshop rectangle.

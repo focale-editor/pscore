@@ -188,7 +188,7 @@ final class PsPatternChannel {
   }
 
   /// Number of bytes used by one decoded row.
-  int get rowBytes => (bounds.width * depth + 7) ~/ 8;
+  late final int rowBytes = (bounds.width * depth + 7) ~/ 8;
 
   /// Returns the exact stored sample at source coordinate [x], [y].
   ///
@@ -250,6 +250,16 @@ final class PsPatternChannel {
     required int y,
     int fallback = 0,
   }) {
+    if (depth == 8) {
+      // Skip the normalize-and-rescale round trip that cannot change a byte.
+      final Uint8List? bytes = decodedData;
+      final int localX = x - bounds.left;
+      final int localY = y - bounds.top;
+      if (bytes == null || localX < 0 || localY < 0 || localX >= bounds.width || localY >= bounds.height) {
+        return fallback;
+      }
+      return bytes[localY * bounds.width + localX];
+    }
     final num? sample = sampleAt(x: x, y: y);
     if (sample == null) {
       return fallback;
@@ -484,27 +494,33 @@ final class PsPattern {
     final int originX = bounds.isValid ? bounds.left : 0;
     final int originY = bounds.isValid ? bounds.top : 0;
     final PsPatternChannel? alpha = alphaChannel;
+    // Resolving the planes and the transparency rule once keeps the pixel loop
+    // free of slot lookups and mode tests that cannot change between pixels.
+    final List<PsPatternChannel?> planes = <PsPatternChannel?>[
+      for (int index = 0; index < 4; index++) channelForSlot(index),
+    ];
+    final PsPatternIndexedMetadata? metadata = indexedMetadata;
+    final int? transparentIndex = alpha == null && colorMode == PsPatternColorMode.indexed && (metadata?.hasTransparentIndex ?? false) ? metadata?.transparentIndex : null;
+    int offset = 0;
     for (int y = 0; y < outputHeight; y++) {
+      final int sourceY = originY + y;
       for (int x = 0; x < outputWidth; x++) {
         final int sourceX = originX + x;
-        final int sourceY = originY + y;
         final PsRgbColor color = _rgbAt(
+          planes: planes,
           x: sourceX,
           y: sourceY,
           cmykConverter: cmykConverter,
         );
         int alphaValue = _byteSample(alpha, x: sourceX, y: sourceY, fallback: 255);
-        if (alpha == null && colorMode == PsPatternColorMode.indexed && indexedMetadata?.hasTransparentIndex == true) {
-          final int index = _byteSample(channelForSlot(0), x: sourceX, y: sourceY, fallback: 0);
-          if (index == indexedMetadata?.transparentIndex) {
-            alphaValue = 0;
-          }
+        if (transparentIndex != null && _byteSample(planes[0], x: sourceX, y: sourceY, fallback: 0) == transparentIndex) {
+          alphaValue = 0;
         }
-        final int offset = (y * outputWidth + x) * 4;
         output[offset] = color.red;
         output[offset + 1] = color.green;
         output[offset + 2] = color.blue;
         output[offset + 3] = alphaValue;
+        offset += 4;
       }
     }
     return PsPatternImage(width: outputWidth, height: outputHeight, rgba: output);
@@ -512,28 +528,30 @@ final class PsPattern {
 
   /// Resolves one source coordinate into a profile-independent RGB preview.
   PsRgbColor _rgbAt({
+    required List<PsPatternChannel?> planes,
     required int x,
     required int y,
     required PsCmykToRgbConverter? cmykConverter,
   }) => switch (colorMode) {
-    PsPatternColorMode.bitmap => _grayColor(255 - _byteSample(channelForSlot(0), x: x, y: y, fallback: 0)),
-    PsPatternColorMode.grayscale || PsPatternColorMode.multichannel || PsPatternColorMode.duotone || PsPatternColorMode.unknown => _grayColor(_byteSample(channelForSlot(0), x: x, y: y, fallback: 0)),
-    PsPatternColorMode.indexed => _indexedColor(x: x, y: y),
+    PsPatternColorMode.bitmap => _grayColor(255 - _byteSample(planes[0], x: x, y: y, fallback: 0)),
+    PsPatternColorMode.grayscale || PsPatternColorMode.multichannel || PsPatternColorMode.duotone || PsPatternColorMode.unknown => _grayColor(_byteSample(planes[0], x: x, y: y, fallback: 0)),
+    PsPatternColorMode.indexed => _indexedColor(planes: planes, x: x, y: y),
     PsPatternColorMode.rgb => PsRgbColor(
-      red: _byteSample(channelForSlot(0), x: x, y: y, fallback: 0),
-      green: _byteSample(channelForSlot(1), x: x, y: y, fallback: 0),
-      blue: _byteSample(channelForSlot(2), x: x, y: y, fallback: 0),
+      red: _byteSample(planes[0], x: x, y: y, fallback: 0),
+      green: _byteSample(planes[1], x: x, y: y, fallback: 0),
+      blue: _byteSample(planes[2], x: x, y: y, fallback: 0),
     ),
-    PsPatternColorMode.cmyk => _cmykColor(x: x, y: y, converter: cmykConverter),
-    PsPatternColorMode.lab => _labColor(x: x, y: y),
+    PsPatternColorMode.cmyk => _cmykColor(planes: planes, x: x, y: y, converter: cmykConverter),
+    PsPatternColorMode.lab => _labColor(planes: planes, x: x, y: y),
   };
 
   /// Resolves a palette index while retaining a grayscale fallback for missing tables.
   PsRgbColor _indexedColor({
+    required List<PsPatternChannel?> planes,
     required int x,
     required int y,
   }) {
-    final int index = _byteSample(channelForSlot(0), x: x, y: y, fallback: 0);
+    final int index = _byteSample(planes[0], x: x, y: y, fallback: 0);
     final Uint8List? table = palette;
     if (table == null || table.length < 256 * 3) {
       return _grayColor(index);
@@ -544,14 +562,15 @@ final class PsPattern {
 
   /// Converts Photoshop's inverted CMYK samples with an optional caller profile.
   PsRgbColor _cmykColor({
+    required List<PsPatternChannel?> planes,
     required int x,
     required int y,
     required PsCmykToRgbConverter? converter,
   }) {
-    final double cyanInverted = _normalizedSample(channelForSlot(0), x: x, y: y, fallback: 1);
-    final double magentaInverted = _normalizedSample(channelForSlot(1), x: x, y: y, fallback: 1);
-    final double yellowInverted = _normalizedSample(channelForSlot(2), x: x, y: y, fallback: 1);
-    final double blackInverted = _normalizedSample(channelForSlot(3), x: x, y: y, fallback: 1);
+    final double cyanInverted = _normalizedSample(planes[0], x: x, y: y, fallback: 1);
+    final double magentaInverted = _normalizedSample(planes[1], x: x, y: y, fallback: 1);
+    final double yellowInverted = _normalizedSample(planes[2], x: x, y: y, fallback: 1);
+    final double blackInverted = _normalizedSample(planes[3], x: x, y: y, fallback: 1);
     if (converter != null) {
       return converter(
         cyan: 1 - cyanInverted,
@@ -569,12 +588,13 @@ final class PsPattern {
 
   /// Converts normalized Photoshop Lab channels through D50 XYZ and sRGB.
   PsRgbColor _labColor({
+    required List<PsPatternChannel?> planes,
     required int x,
     required int y,
   }) {
-    final double lightness = _normalizedSample(channelForSlot(0), x: x, y: y, fallback: 0) * 100;
-    final double a = _normalizedSample(channelForSlot(1), x: x, y: y, fallback: 128 / 255) * 255 - 128;
-    final double b = _normalizedSample(channelForSlot(2), x: x, y: y, fallback: 128 / 255) * 255 - 128;
+    final double lightness = _normalizedSample(planes[0], x: x, y: y, fallback: 0) * 100;
+    final double a = _normalizedSample(planes[1], x: x, y: y, fallback: 128 / 255) * 255 - 128;
+    final double b = _normalizedSample(planes[2], x: x, y: y, fallback: 128 / 255) * 255 - 128;
     final double fy = (lightness + 16) / 116;
     final double fx = fy + a / 500;
     final double fz = fy - b / 200;

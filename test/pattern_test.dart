@@ -277,6 +277,61 @@ void main() {
         throwsA(isA<PsWriteException>()),
       );
     });
+
+    test('permissive mode declares the length of a rebuilt slot payload', () {
+      // A stale declared length would desynchronize the slot list, because
+      // rebuilding a channel can change its byte count. The source here claims
+      // 30 bytes for a channel that rebuilds to 24.
+      final PsPattern source = _decodedPattern(
+        mode: PsPatternColorMode.grayscale,
+        values: <int>[127],
+      );
+      final PsPatternChannelSlot channelSlot = source.slots.first;
+      final PsPattern stale = PsPattern(
+        version: source.version,
+        colorMode: source.colorMode,
+        colorModeCode: source.colorModeCode,
+        vertical: source.vertical,
+        horizontal: source.horizontal,
+        name: source.name,
+        id: source.id,
+        idData: source.idData,
+        palette: null,
+        indexedMetadata: null,
+        virtualMemoryVersion: source.virtualMemoryVersion,
+        bounds: source.bounds,
+        declaredChannelCount: source.declaredChannelCount,
+        slots: <PsPatternChannelSlot>[
+          PsPatternChannelSlot(
+            index: channelSlot.index,
+            writtenCode: channelSlot.writtenCode,
+            declaredLength: 30,
+            data: channelSlot.data,
+            channel: channelSlot.channel,
+          ),
+          ...source.slots.skip(1),
+        ],
+        virtualMemoryTrailingData: source.virtualMemoryTrailingData,
+        recordTrailingData: source.recordTrailingData,
+        recordData: null,
+      );
+
+      final Uint8List encoded = PsPatternRecordEncoder.encode(
+        pattern: stale,
+        kind: PsPatternRecordKind.standalone,
+        options: const PsPatternEncodeOptions(mode: PsPatternEncodeMode.permissive),
+      );
+      final List<String> issues = <String>[];
+      final PsPatternDecodeResult decoded = PsPatternRecordDecoder.decode(
+        reader: PsBinaryReader(bytes: encoded),
+        kind: PsPatternRecordKind.standalone,
+        onIssue: (message, offset) => issues.add(message),
+      );
+
+      expect(issues, isEmpty);
+      expect(decoded.pattern.slots.first.declaredLength, 24);
+      expect(decoded.pattern.channelForSlot(0)?.sampleAt(x: 0, y: 0), 127);
+    });
   });
 }
 

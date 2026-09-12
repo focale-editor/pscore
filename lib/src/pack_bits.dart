@@ -1,5 +1,6 @@
 import 'dart:typed_data';
 
+import 'package:pscore/src/binary.dart';
 import 'package:pscore/src/exceptions.dart';
 
 /// Encodes and decodes the PackBits run-length format used by Photoshop.
@@ -92,6 +93,111 @@ abstract final class PsPackBitsCodec {
     return write;
   }
 
+  /// Decodes a complete table-prefixed sequence of PackBits rows.
+  static Uint8List decodeRows(
+    Uint8List input, {
+    required int rowBytes,
+    required int rowCount,
+    bool wideRowLengths = false,
+  }) {
+    final ({Uint8List data, int bytesRead}) decoded = decodeRowsPrefix(
+      input,
+      rowBytes: rowBytes,
+      rowCount: rowCount,
+      wideRowLengths: wideRowLengths,
+    );
+    if (decoded.bytesRead != input.length) {
+      throw PsFormatException(
+        message: 'Unexpected bytes after PackBits rows',
+        source: input,
+        offset: decoded.bytesRead,
+      );
+    }
+    return decoded.data;
+  }
+
+  /// Decodes table-prefixed rows from the beginning of [input].
+  static ({Uint8List data, int bytesRead}) decodeRowsPrefix(
+    Uint8List input, {
+    required int rowBytes,
+    required int rowCount,
+    bool wideRowLengths = false,
+  }) {
+    final PsBinaryReader reader = PsBinaryReader(bytes: input);
+    final Uint8List data = decodeRowsReader(
+      reader,
+      rowBytes: rowBytes,
+      rowCount: rowCount,
+      wideRowLengths: wideRowLengths,
+    );
+    return (data: data, bytesRead: reader.offset);
+  }
+
+  /// Decodes table-prefixed rows at the current [reader] position.
+  static Uint8List decodeRowsReader(
+    PsBinaryReader reader, {
+    required int rowBytes,
+    required int rowCount,
+    bool wideRowLengths = false,
+  }) {
+    _validateDecodedRowGeometry(rowBytes, rowCount);
+    final List<int> lengths = <int>[];
+    for (int row = 0; row < rowCount; row++) {
+      lengths.add(wideRowLengths ? reader.readUint32() : reader.readUint16());
+    }
+    final Uint8List output = Uint8List(rowBytes * rowCount);
+    for (int row = 0; row < rowCount; row++) {
+      final Uint8List decoded = decodeRow(
+        reader.readView(lengths[row]),
+        decodedLength: rowBytes,
+      );
+      output.setRange(row * rowBytes, (row + 1) * rowBytes, decoded);
+    }
+    return output;
+  }
+
+  /// Encodes rows and prefixes their 16-bit or 32-bit encoded lengths.
+  static Uint8List encodeRows(
+    Uint8List input, {
+    required int rowBytes,
+    required int rowCount,
+    bool wideRowLengths = false,
+  }) {
+    _validateEncodedRowGeometry(rowBytes, rowCount);
+    final int expectedLength = rowBytes * rowCount;
+    if (input.length != expectedLength) {
+      throw PsWriteException(
+        message: 'PackBits row input has ${input.length} bytes; expected $expectedLength',
+      );
+    }
+    final int lengthBytes = wideRowLengths ? 4 : 2;
+    final int tableBytes = rowCount * lengthBytes;
+    final Uint8List output = Uint8List(tableBytes + rowCount * maxEncodedLength(rowBytes));
+    final ByteData table = ByteData.sublistView(output, 0, tableBytes);
+    int outputOffset = tableBytes;
+    for (int row = 0; row < rowCount; row++) {
+      final int encodedStart = outputOffset;
+      outputOffset = encodeRowInto(
+        Uint8List.sublistView(input, row * rowBytes, (row + 1) * rowBytes),
+        output,
+        outputOffset,
+      );
+      final int encodedLength = outputOffset - encodedStart;
+      if (!wideRowLengths && encodedLength > 0xffff) {
+        throw const PsWriteException(
+          message: 'A PackBits row exceeds the unsigned 16-bit length capacity',
+        );
+      }
+      if (wideRowLengths) {
+        table.setUint32(row * lengthBytes, encodedLength);
+      } else {
+        table.setUint16(row * lengthBytes, encodedLength);
+      }
+    }
+    final Uint8List result = Uint8List.sublistView(output, 0, outputOffset);
+    return outputOffset * 2 < output.length ? Uint8List.fromList(result) : result;
+  }
+
   /// Returns the repeated run at [offset], capped to PackBits' maximum.
   static int _repeatedRunLength(Uint8List row, int offset) {
     int length = 1;
@@ -99,5 +205,23 @@ abstract final class PsPackBitsCodec {
       length++;
     }
     return length;
+  }
+
+  /// Rejects negative row geometry before allocation or iteration.
+  static void _validateDecodedRowGeometry(int rowBytes, int rowCount) {
+    if (rowBytes < 0 || rowCount < 0) {
+      throw const PsFormatException(
+        message: 'PackBits row width and count cannot be negative',
+      );
+    }
+  }
+
+  /// Rejects negative row geometry before sizing an encoded buffer.
+  static void _validateEncodedRowGeometry(int rowBytes, int rowCount) {
+    if (rowBytes < 0 || rowCount < 0) {
+      throw const PsWriteException(
+        message: 'PackBits row width and count cannot be negative',
+      );
+    }
   }
 }

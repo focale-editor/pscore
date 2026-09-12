@@ -27,7 +27,8 @@ final class PsDescriptor {
 
   /// Returns the last item matching [key], when present.
   PsDescriptorValue? value(String key) {
-    for (final PsDescriptorItem item in items.reversed) {
+    for (int index = items.length - 1; index >= 0; index--) {
+      final PsDescriptorItem item = items[index];
       if (item.key == key) {
         return item.value;
       }
@@ -520,7 +521,11 @@ final class PsClassValue extends PsDescriptorValue {
 
 /// Resource limits applied while decoding an Action Descriptor.
 final class PsDescriptorDecodeOptions {
-  /// Maximum nested object depth.
+  /// Maximum nested object, list, and object-reference depth.
+  ///
+  /// Every nested collection counts, because each one costs a stack frame while
+  /// decoding. Without this bound a small malformed input could nest lists
+  /// deeply enough to overflow the stack instead of raising a format error.
   final int maxDepth;
 
   /// Maximum aggregate number of descriptor items and list values.
@@ -584,7 +589,7 @@ final class _PsDescriptorDecodeContext {
     required this.options,
   });
 
-  /// Rejects an object nested deeper than the configured bound.
+  /// Rejects a collection nested deeper than the configured bound.
   void checkDepth(PsBinaryReader reader, int depth) {
     if (depth > options.maxDepth) {
       throw PsFormatException(message: 'Action Descriptor depth $depth exceeds the configured ${options.maxDepth} limit', source: reader.bytes, offset: reader.baseOffset + reader.offset);
@@ -663,10 +668,11 @@ PsUnitFloatsValue _readUnitFloatsValue(PsBinaryReader reader, _PsDescriptorDecod
 
 /// Reads a list or object-reference list after accounting its element count.
 PsDescriptorValue _readListValue(PsBinaryReader reader, _PsDescriptorDecodeContext context, int depth, {required bool reference}) {
+  context.checkDepth(reader, depth);
   final int count = reader.readUint32();
   context.addValues(reader, count);
   final List<PsDescriptorValue> values = <PsDescriptorValue>[
-    for (int index = 0; index < count; index++) _readValue(reader, reader.readString(4), context, depth),
+    for (int index = 0; index < count; index++) _readValue(reader, reader.readString(4), context, depth + 1),
   ];
   return reference ? PsReferenceValue(values: values) : PsListValue(values: values);
 }
@@ -783,8 +789,10 @@ String _readUnicodeString(PsBinaryReader reader) {
 
 /// Writes [value] as a length-prefixed big-endian UTF-16 string.
 void _writeUnicodeString(PsBinaryWriter writer, String value) {
-  writer.writeUint32(value.codeUnits.length);
-  value.codeUnits.forEach(writer.writeUint16);
+  final List<int> codeUnits = value.codeUnits;
+  writer
+    ..writeUint32(codeUnits.length)
+    ..writeUint16List(codeUnits);
 }
 
 /// Reads a variable-length Photoshop identifier.
@@ -794,7 +802,14 @@ void _writeUnicodeString(PsBinaryWriter writer, String value) {
 }
 
 /// Writes a four-byte or length-prefixed Photoshop identifier.
+///
+/// An empty identifier has no encoding: a zero length field selects the compact
+/// four-character form, so writing one would make readers consume the bytes that
+/// follow. Photoshop spells an absent identifier `null` instead.
 void _writeId(PsBinaryWriter writer, String value, {required bool compact}) {
+  if (value.isEmpty) {
+    throw const PsWriteException(message: 'A descriptor identifier cannot be empty; use "null" for an absent identifier');
+  }
   if (compact && value.length == 4 && value.codeUnits.every((unit) => unit <= 0xff)) {
     writer
       ..writeUint32(0)

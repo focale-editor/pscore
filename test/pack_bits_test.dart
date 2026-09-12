@@ -67,5 +67,98 @@ void main() {
         throwsA(isA<PsFormatException>()),
       );
     });
+
+    test('round-trips table-prefixed rows with narrow and wide lengths', () {
+      final Uint8List source = Uint8List.fromList(<int>[
+        1,
+        1,
+        1,
+        2,
+        3,
+        4,
+        5,
+        5,
+        5,
+        6,
+        7,
+        8,
+      ]);
+
+      for (final bool wide in <bool>[false, true]) {
+        final Uint8List encoded = PsPackBitsCodec.encodeRows(
+          source,
+          rowBytes: 4,
+          rowCount: 3,
+          wideRowLengths: wide,
+        );
+
+        expect(
+          PsPackBitsCodec.decodeRows(
+            encoded,
+            rowBytes: 4,
+            rowCount: 3,
+            wideRowLengths: wide,
+          ),
+          orderedEquals(source),
+        );
+      }
+    });
+
+    test('reports consumed bytes when rows are followed by another payload', () {
+      final Uint8List source = Uint8List.fromList(<int>[1, 2, 3, 4]);
+      final Uint8List encoded = PsPackBitsCodec.encodeRows(
+        source,
+        rowBytes: 2,
+        rowCount: 2,
+      );
+      final Uint8List withTrailing = Uint8List.fromList(<int>[...encoded, 9, 8]);
+
+      final ({Uint8List data, int bytesRead}) decoded = PsPackBitsCodec.decodeRowsPrefix(
+        withTrailing,
+        rowBytes: 2,
+        rowCount: 2,
+      );
+
+      expect(decoded.data, orderedEquals(source));
+      expect(decoded.bytesRead, encoded.length);
+      expect(
+        () => PsPackBitsCodec.decodeRows(
+          withTrailing,
+          rowBytes: 2,
+          rowCount: 2,
+        ),
+        throwsA(isA<PsFormatException>()),
+      );
+    });
+
+    test('rejects mismatched row input lengths', () {
+      expect(
+        () => PsPackBitsCodec.encodeRows(
+          Uint8List.fromList(<int>[1, 2, 3]),
+          rowBytes: 2,
+          rowCount: 2,
+        ),
+        throwsA(isA<PsWriteException>()),
+      );
+    });
+
+    test('reports invalid row geometry in the relevant codec domain', () {
+      expect(
+        () => PsPackBitsCodec.decodeRows(
+          Uint8List(0),
+          rowBytes: -1,
+          rowCount: 0,
+        ),
+        throwsA(isA<PsFormatException>()),
+      );
+      expect(
+        () => PsPackBitsCodec.encodeRows(
+          Uint8List(0),
+          rowBytes: -1,
+          rowCount: 0,
+        ),
+        throwsA(isA<PsWriteException>()),
+      );
+    });
   });
 }

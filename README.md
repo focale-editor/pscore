@@ -1,6 +1,6 @@
 # PsCore
 
-PsCore contains the pure Dart binary primitives shared by Focale's Photoshop format packages. It prevents AbrKit, PatKit, and PsdKit from maintaining subtly different implementations of the same codecs.
+PsCore contains the pure Dart binary primitives shared by Focale's Photoshop format packages. It prevents AbrKit, AcvKit, AslKit, CshKit, PatKit and PsdKit from maintaining subtly different implementations of the same codecs.
 
 The package currently provides:
 
@@ -47,5 +47,3 @@ final Uint8List patternBytes = PsPatternRecordEncoder.encode(
   kind: PsPatternRecordKind.standalone,
 );
 ```
-
-PsCore deliberately does not contain PSD-, ABR-, or PAT-container domain models. Those belong in PsdKit, AbrKit, and PatKit respectively; only their genuinely shared binary structures live here.
