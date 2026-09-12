@@ -175,6 +175,109 @@ void main() {
       );
     });
   });
+
+  group('PsPatternRecordEncoder', () {
+    test('rebuilds a standalone pattern without preserved source bytes', () {
+      final Uint8List bytes = _record(
+        mode: PsPatternColorMode.rgb,
+        channels: const <_TestChannel>[
+          _TestChannel(depth: 8, bytes: <int>[255, 0], packBits: true),
+          _TestChannel(depth: 8, bytes: <int>[0, 255], packBits: true),
+          _TestChannel(depth: 8, bytes: <int>[0, 0], packBits: true),
+        ],
+      );
+      final PsPattern pattern = PsPatternRecordDecoder.decode(
+        reader: PsBinaryReader(bytes: bytes),
+        kind: PsPatternRecordKind.standalone,
+        options: const PsPatternDecodeOptions(
+          preserveChannelData: false,
+          preserveRecordData: false,
+        ),
+      ).pattern;
+
+      final Uint8List encoded = PsPatternRecordEncoder.encode(
+        pattern: pattern,
+        kind: PsPatternRecordKind.standalone,
+      );
+
+      expect(encoded, orderedEquals(bytes));
+    });
+
+    test('encodes and aligns a block of embedded records', () {
+      final PsPattern pattern = _decodedPattern(
+        mode: PsPatternColorMode.grayscale,
+        values: <int>[127],
+      );
+
+      final Uint8List block = PsPatternBlockEncoder.encodeAll(<PsPattern>[pattern]);
+      final PsPatternBlockDecodeResult decoded = PsPatternBlockDecoder.decodeAll(
+        reader: PsBinaryReader(bytes: block),
+        maxPatterns: 1,
+      );
+
+      expect(block.length % 4, 0);
+      expect(decoded.patterns.single.name, 'Preview');
+      expect(decoded.patterns.single.channels.single.decodedData, orderedEquals(<int>[127]));
+    });
+
+    test('strict mode rejects an unknown compression marker', () {
+      final Uint8List bytes = _record(
+        mode: PsPatternColorMode.grayscale,
+        channels: const <_TestChannel>[
+          _TestChannel(depth: 8, bytes: <int>[10, 20], compressionCode: 7),
+        ],
+      );
+      final PsPattern pattern = PsPatternRecordDecoder.decode(
+        reader: PsBinaryReader(bytes: bytes),
+        kind: PsPatternRecordKind.standalone,
+      ).pattern;
+
+      expect(
+        () => PsPatternRecordEncoder.encode(
+          pattern: pattern,
+          kind: PsPatternRecordKind.standalone,
+        ),
+        throwsA(isA<PsWriteException>()),
+      );
+    });
+
+    test('permissive mode rejects a semantic identifier outside Latin-1', () {
+      final PsPattern source = _decodedPattern(
+        mode: PsPatternColorMode.grayscale,
+        values: <int>[127],
+      );
+      final PsPattern invalid = PsPattern(
+        version: source.version,
+        colorMode: source.colorMode,
+        colorModeCode: source.colorModeCode,
+        vertical: source.vertical,
+        horizontal: source.horizontal,
+        name: source.name,
+        id: 'snowman-☃',
+        idData: Uint8List(0),
+        palette: source.palette,
+        indexedMetadata: source.indexedMetadata,
+        virtualMemoryVersion: source.virtualMemoryVersion,
+        bounds: source.bounds,
+        declaredChannelCount: source.declaredChannelCount,
+        slots: source.slots,
+        virtualMemoryTrailingData: source.virtualMemoryTrailingData,
+        recordTrailingData: source.recordTrailingData,
+        recordData: null,
+      );
+
+      expect(
+        () => PsPatternRecordEncoder.encode(
+          pattern: invalid,
+          kind: PsPatternRecordKind.standalone,
+          options: const PsPatternEncodeOptions(
+            mode: PsPatternEncodeMode.permissive,
+          ),
+        ),
+        throwsA(isA<PsWriteException>()),
+      );
+    });
+  });
 }
 
 /// Describes one synthetic channel used by [_record].

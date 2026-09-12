@@ -8,3 +8,4 @@ export 'src/pack_bits.dart';
 export 'src/path.dart';
 export 'src/pattern.dart';
 export 'src/pattern_codec.dart';
+export 'src/pattern_encoder.dart';
