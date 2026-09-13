@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="screenshots/overview.png" alt="PsCore package illustration" width="180">
+</p>
+
 # PsCore
 
 PsCore contains the pure Dart binary primitives shared by Focale's Photoshop format packages. It prevents AbrKit, AcvKit, AslKit, CshKit, PatKit and PsdKit from maintaining subtly different implementations of the same codecs.
@@ -63,3 +67,7 @@ final Uint8List patternBytes = PsPatternRecordEncoder.encode(
   kind: PsPatternRecordKind.standalone,
 );
 ```
+
+---
+
+Built for **[Focale](https://focale-editor.app)**, an advanced local image editor. Discover what these packages make possible in a real creative workflow.
