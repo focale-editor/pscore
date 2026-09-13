@@ -1,5 +1,10 @@
 # 📰 PsCore changelog
 
+## v0.1.5
+Released on September 13, 2026.
+
+* **DOCS**: Added contributing guide, package screenshot, and pubspec metadata. ([#a19b51f](https://github.com/focale-editor/pscore/commit/a19b51f))
+
 ## v0.1.4
 Released on September 12, 2026.
 
