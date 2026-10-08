@@ -75,6 +75,15 @@ final class PsPresetHierarchyEntry {
     required this.presetIndex,
     required this.rawDescriptor,
   });
+
+  /// Returns the referred preset from [presets], when the mapping is valid.
+  T? resolvePreset<T>(List<T> presets) {
+    final int? index = presetIndex;
+    if (index == null || index < 0 || index >= presets.length) {
+      return null;
+    }
+    return presets[index];
+  }
 }
 
 /// Converts a generic Photoshop `phry` descriptor into typed hierarchy entries.

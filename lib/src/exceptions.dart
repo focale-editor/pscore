@@ -1,5 +1,8 @@
 /// Reports malformed, truncated, or unsupported Photoshop-format input.
-final class PsFormatException implements FormatException {
+///
+/// Format packages extend this class with their own exception type, so one
+/// `on PsFormatException` clause catches decoding errors from any of them.
+base class PsFormatException implements FormatException {
   /// Human-readable explanation of the malformed data.
   @override
   final String message;
@@ -19,15 +22,21 @@ final class PsFormatException implements FormatException {
     this.offset,
   });
 
+  /// Type name shown by [toString].
+  String get typeName => 'PsFormatException';
+
   @override
   String toString() {
     final String location = offset == null ? '' : ' at byte $offset';
-    return 'PsFormatException$location: $message';
+    return '$typeName$location: $message';
   }
 }
 
 /// Reports data that cannot be represented by a requested Photoshop format.
-final class PsWriteException implements Exception {
+///
+/// Format packages extend this class with their own exception type, so one
+/// `on PsWriteException` clause catches encoding errors from any of them.
+base class PsWriteException implements Exception {
   /// Explains why encoding failed.
   final String message;
 
@@ -36,6 +45,40 @@ final class PsWriteException implements Exception {
     required this.message,
   });
 
+  /// Type name shown by [toString].
+  String get typeName => 'PsWriteException';
+
   @override
-  String toString() => 'PsWriteException: $message';
+  String toString() => '$typeName: $message';
+}
+
+/// Describes a recoverable compatibility issue found while decoding.
+///
+/// Format packages extend this class with the source context they track, such
+/// as the index of the preset being decoded.
+abstract base class PsWarning {
+  /// Human-readable explanation of the compatibility issue.
+  final String message;
+
+  /// Absolute byte offset associated with the issue, when known.
+  final int? offset;
+
+  /// Creates a warning at an optional absolute byte [offset].
+  const PsWarning({
+    required this.message,
+    this.offset,
+  });
+
+  /// Type name shown by [toString].
+  String get typeName;
+
+  /// Source context shown by [toString] after the byte offset, such as
+  /// `' in pattern 2'`, or an empty string.
+  String get context => '';
+
+  @override
+  String toString() {
+    final String location = offset == null ? '' : ' at byte $offset';
+    return '$typeName$location$context: $message';
+  }
 }

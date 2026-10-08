@@ -64,6 +64,8 @@ void main() {
     check(entries[1].name).equals('Second');
     check(entries[2].kind).equals(PsPresetHierarchyEntryKind.groupEnd);
     check(entries[2].depth).equals(0);
+    check(entries[1].resolvePreset(<String>['first', 'second'])).equals('second');
+    check(entries[0].resolvePreset(<String>['first', 'second'])).isNull();
     check(issues).isEmpty();
   });
 }

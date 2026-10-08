@@ -16,7 +16,11 @@ The package currently provides:
 - a shared Photoshop pattern-record model, bounded decoder, and encoder;
 - raw and PackBits pattern planes at 1, 8, 16, and 32 bits;
 - profile-independent RGBA previews for standard Photoshop color modes;
-- shared format and write exceptions with byte offsets.
+- tone curves, vector paths, and preset hierarchies;
+- layer-style colors, gradients, contours, effects, and blending options, with
+  typed views over existing descriptors and builders for new ones;
+- format, write, and warning base types that every format package extends, so
+  one `on PsFormatException` clause catches errors from any of them.
 
 ## Platform support
 
