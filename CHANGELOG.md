@@ -1,5 +1,11 @@
 # 📰 PsCore changelog
 
+## v0.1.6
+Released on October 9, 2026.
+
+* **FEAT**: Added adjustment settings codecs, ATN integer reference support, and color conversions. ([#7c4bc2c](https://github.com/focale-editor/pscore/commit/7c4bc2c))
+* **FEAT**: Added layer effects, style resources, and warning base class. ([#5a7d4eb](https://github.com/focale-editor/pscore/commit/5a7d4eb))
+
 ## v0.1.5
 Released on September 13, 2026.
 
