@@ -93,6 +93,84 @@ void main() {
       ).throws<PsFormatException>();
     });
 
+    test('preserves class-prefixed ATN integer references and following values', () {
+      // Independently framed ATN descriptor: a reference list containing an
+      // identifier and an index, followed by a Boolean outside that list.
+      final PsBinaryWriter writer = PsBinaryWriter()
+        ..writeUint32(0)
+        ..writeUint32(0)
+        ..writeString('move')
+        ..writeUint32(2)
+        ..writeUint32(0)
+        ..writeString('null')
+        ..writeString('obj ')
+        ..writeUint32(2);
+      for (final String form in ['Idnt', 'indx']) {
+        writer
+          ..writeString(form)
+          ..writeUint32(1)
+          ..writeUint16(0)
+          ..writeUint32(4)
+          ..writeString('Lyr ')
+          ..writeUint32(form == 'Idnt' ? 0xf0000001 : 0);
+      }
+      writer
+        ..writeUint32(0)
+        ..writeString('Adjs')
+        ..writeString('bool')
+        ..writeUint8(1);
+      final Uint8List bytes = writer.takeBytes();
+
+      final PsDescriptor descriptor = PsDescriptorCodec.decode(
+        bytes,
+        options: const PsDescriptorDecodeOptions(integerReferencesHaveClass: true),
+      );
+
+      final PsReferenceValue reference = descriptor.value('null')! as PsReferenceValue;
+      final PsIdentifierValue identifier = reference.values.first as PsIdentifierValue;
+      final PsIndexValue index = reference.values.last as PsIndexValue;
+      check(identifier.name).equals('\u0000');
+      check(identifier.classId).equals('Lyr ');
+      check(identifier.value).equals(0xf0000001);
+      check(index.name).equals('\u0000');
+      check(index.classId).equals('Lyr ');
+      check(index.value).equals(0);
+      check(descriptor.booleanValue('Adjs')).equals(true);
+      check(PsDescriptorCodec.encode(descriptor, requireIntegerReferenceClasses: true)).deepEquals(bytes);
+    });
+
+    test('rejects an ATN reference without its object class inside nested data', () {
+      const PsDescriptor descriptor = PsDescriptor(
+        name: '',
+        classId: 'move',
+        items: [
+          PsDescriptorItem(
+            key: 'null',
+            value: PsListValue(
+              values: [
+                PsObjectValue(
+                  value: PsDescriptor(
+                    name: '',
+                    classId: 'null',
+                    items: [
+                      PsDescriptorItem(
+                        key: 'refs',
+                        value: PsReferenceValue(values: [PsIndexValue(value: 3)]),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      );
+
+      check(() => PsDescriptorCodec.encode(descriptor, requireIntegerReferenceClasses: true)).throws<PsWriteException>();
+      final Uint8List compact = PsDescriptorCodec.encode(descriptor);
+      check(PsDescriptorCodec.encode(PsDescriptorCodec.decode(compact))).deepEquals(compact);
+    });
+
     test('enforces aggregate descriptor value limits before allocation', () {
       const PsDescriptor descriptor = PsDescriptor(
         name: '',

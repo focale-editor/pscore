@@ -30,9 +30,9 @@ JavaScript.
 Only the JavaScript target needs a compromise: it has no 64-bit integers, and its
 `ByteData` 64-bit accessors are unavailable. There, `PsCore` composes each 64-bit
 field from two 32-bit halves, which is exact up to `psMaxExactInteger`, or two to
-the power of 53 minus one. That covers every 64-bit field real Photoshop data
-contains, since a larger `8B64` block length or `comp` descriptor value would
-describe petabytes. Beyond it, reading raises a `PsFormatException` and writing a
+the power of 53 minus one. A `comp` descriptor value is an arbitrary signed
+integer, so some valid values exceed this JavaScript limit even in small files.
+Beyond the exact range, reading raises a `PsFormatException` and writing a
 `PsWriteException`, rather than silently dropping the low bits.
 
 Native and WebAssembly targets both use the platform's own 64-bit accessors and

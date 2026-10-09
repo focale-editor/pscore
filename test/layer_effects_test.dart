@@ -15,6 +15,36 @@ void main() {
       check(color.blue).equals(30);
     });
 
+    test('creates every process color space and approximates it in sRGB', () {
+      final List<PsColor> colors = [
+        PsColor.cmyk(cyan: 0, magenta: 100, yellow: 100, black: 0),
+        PsColor.grayscale(gray: 25),
+        PsColor.hsb(hue: 240, saturation: 100, brightness: 50),
+        PsColor.lab(lightness: 100, a: 0, b: 0),
+      ];
+
+      check(colors.map((color) => color.descriptor.classId).toList()).deepEquals(['CMYC', 'Grsc', 'HSBC', 'LbCl']);
+      check(colors[2].descriptor.value('H   ')).isA<PsUnitFloatValue>().has((value) => value.unit, 'unit').equals('#Ang');
+      final List<List<int>?> rgb = [
+        for (final PsColor color in colors)
+          switch (color.toRgb()) {
+            (:final double red, :final double green, :final double blue) => [red.round(), green.round(), blue.round()],
+            null => null,
+          },
+      ];
+      check(rgb).deepEquals([
+        [255, 0, 0],
+        [191, 191, 191],
+        [0, 0, 128],
+        [255, 255, 255],
+      ]);
+    });
+
+    test('cannot approximate book colors or incomplete descriptors', () {
+      check(PsColor.fromDescriptor(const PsDescriptor(name: '', classId: 'BkCl')).toRgb()).isNull();
+      check(PsColor.fromDescriptor(const PsDescriptor(name: '', classId: 'RGBC')).toRgb()).isNull();
+    });
+
     test('reads non-RGB colors without inventing RGB components', () {
       final PsColor color = PsColor.fromDescriptor(
         const PsDescriptor(

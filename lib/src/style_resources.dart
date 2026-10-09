@@ -1,3 +1,4 @@
+import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'package:pscore/src/descriptor.dart';
@@ -104,6 +105,31 @@ final class PsColor {
     ),
   );
 
+  /// Creates a `CMYC` color from ink coverages in percent.
+  factory PsColor.cmyk({
+    required double cyan,
+    required double magenta,
+    required double yellow,
+    required double black,
+  }) => PsColor._create('CMYC', {'Cyn ': cyan, 'Mgnt': magenta, 'Ylw ': yellow, 'Blck': black});
+
+  /// Creates a `Grsc` color from an ink coverage in percent, where 0 is white.
+  factory PsColor.grayscale({required double gray}) => PsColor._create('Grsc', {'Gry ': gray});
+
+  /// Creates an `HSBC` color from a hue in degrees and percentages.
+  factory PsColor.hsb({
+    required double hue,
+    required double saturation,
+    required double brightness,
+  }) => PsColor._create('HSBC', {'H   ': hue, 'Strt': saturation, 'Brgh': brightness}, units: const {'H   ': '#Ang'});
+
+  /// Creates an `LbCl` color from CIE L*a*b* components.
+  factory PsColor.lab({
+    required double lightness,
+    required double a,
+    required double b,
+  }) => PsColor._create('LbCl', {'Lmnc': lightness, 'A   ': a, 'B   ': b});
+
   /// Creates a typed view over a Photoshop color [descriptor].
   factory PsColor.fromDescriptor(PsDescriptor descriptor) {
     final List<String> componentKeys = switch (descriptor.classId) {
@@ -147,6 +173,115 @@ final class PsColor {
 
   /// Blue component in the 0–255 range, when this is an RGB color.
   double? get blue => (components['Bl  '] ?? components['blue'])?.value;
+
+  /// Approximates this color in sRGB, with components in the 0–255 range.
+  ///
+  /// The conversion uses textbook formulas without any ICC profile: CMYK is
+  /// treated as naive subtractive ink and Lab as D50 adapted to D65 with the
+  /// Bradford transform. Returns `null` for book colors, unknown classes, and
+  /// descriptors missing a component.
+  ({double red, double green, double blue})? toRgb() {
+    double? read(String short, String long) => (components[short] ?? components[long])?.value;
+    switch (colorSpace) {
+      case PsColorSpace.rgb:
+        final double? red = this.red;
+        final double? green = this.green;
+        final double? blue = this.blue;
+        return red == null || green == null || blue == null ? null : (red: red, green: green, blue: blue);
+      case PsColorSpace.grayscale:
+        final double? gray = read('Gry ', 'gray');
+        if (gray == null) {
+          return null;
+        }
+        final double level = (100 - gray) * 2.55;
+        return (red: level, green: level, blue: level);
+      case PsColorSpace.cmyk:
+        final double? cyan = read('Cyn ', 'cyan');
+        final double? magenta = read('Mgnt', 'magenta');
+        final double? yellow = read('Ylw ', 'yellowColor');
+        final double? black = read('Blck', 'black');
+        if (cyan == null || magenta == null || yellow == null || black == null) {
+          return null;
+        }
+        final double retained = 255 * (1 - (black / 100).clamp(0, 1));
+        return (
+          red: (1 - (cyan / 100).clamp(0, 1)) * retained,
+          green: (1 - (magenta / 100).clamp(0, 1)) * retained,
+          blue: (1 - (yellow / 100).clamp(0, 1)) * retained,
+        );
+      case PsColorSpace.hsb:
+        final double? hue = read('H   ', 'hue');
+        final double? saturation = read('Strt', 'saturation');
+        final double? brightness = read('Brgh', 'brightness');
+        return hue == null || saturation == null || brightness == null ? null : _hsbToRgb(hue, saturation / 100, brightness / 100);
+      case PsColorSpace.lab:
+        final double? lightness = read('Lmnc', 'luminance');
+        final double? a = read('A   ', 'a');
+        final double? b = read('B   ', 'b');
+        return lightness == null || a == null || b == null ? null : _labToRgb(lightness, a, b);
+      case PsColorSpace.book || PsColorSpace.unknown:
+        return null;
+    }
+  }
+
+  /// Creates a color descriptor of [classId] holding [values] in order.
+  factory PsColor._create(String classId, Map<String, double> values, {Map<String, String> units = const {}}) => PsColor.fromDescriptor(
+    PsDescriptor(
+      name: '\u0000',
+      classId: classId,
+      items: [
+        for (final MapEntry<String, double> entry in values.entries)
+          PsDescriptorItem(
+            key: entry.key,
+            value: switch (units[entry.key]) {
+              final String unit => PsUnitFloatValue(unit: unit, value: entry.value),
+              null => PsDoubleValue(value: entry.value),
+            },
+          ),
+      ],
+    ),
+  );
+
+  /// Converts a hue in degrees and unit saturation and brightness to sRGB.
+  static ({double red, double green, double blue}) _hsbToRgb(double hue, double saturation, double brightness) {
+    final double sector = (hue % 360 + 360) % 360 / 60;
+    final double s = saturation.clamp(0, 1);
+    final double v = brightness.clamp(0, 1) * 255;
+    final double fraction = sector - sector.floor();
+    final double p = v * (1 - s);
+    final double q = v * (1 - fraction * s);
+    final double t = v * (1 - (1 - fraction) * s);
+    return switch (sector.floor() % 6) {
+      0 => (red: v, green: t, blue: p),
+      1 => (red: q, green: v, blue: p),
+      2 => (red: p, green: v, blue: t),
+      3 => (red: p, green: q, blue: v),
+      4 => (red: t, green: p, blue: v),
+      _ => (red: v, green: p, blue: q),
+    };
+  }
+
+  /// Converts D50 CIE L*a*b* to sRGB through the Bradford-adapted D65 white.
+  static ({double red, double green, double blue}) _labToRgb(double lightness, double a, double b) {
+    final double fy = (lightness + 16) / 116;
+    final double x50 = 0.96422 * _inverseLabCurve(fy + a / 500);
+    final double y50 = _inverseLabCurve(fy);
+    final double z50 = 0.82521 * _inverseLabCurve(fy - b / 200);
+    final double x = 0.9555766 * x50 - 0.0230393 * y50 + 0.0631636 * z50;
+    final double y = -0.0282895 * x50 + 1.0099416 * y50 + 0.0210077 * z50;
+    final double z = 0.0122982 * x50 - 0.020483 * y50 + 1.3299098 * z50;
+    return (
+      red: _encodeSrgb(3.2404542 * x - 1.5371385 * y - 0.4985314 * z),
+      green: _encodeSrgb(-0.969266 * x + 1.8760108 * y + 0.041556 * z),
+      blue: _encodeSrgb(0.0556434 * x - 0.2040259 * y + 1.0572252 * z),
+    );
+  }
+
+  /// Applies the inverse CIE Lab transfer function.
+  static double _inverseLabCurve(double value) => value > 6 / 29 ? value * value * value : (108 / 841) * (value - 4 / 29);
+
+  /// Encodes a linear-light component as an sRGB value in the 0–255 range.
+  static double _encodeSrgb(double value) => 255 * (value <= 0.0031308 ? value * 12.92 : 1.055 * math.pow(value, 1 / 2.4).toDouble() - 0.055).clamp(0, 1);
 
   /// Maps a Photoshop color descriptor [classId] to a known color space.
   static PsColorSpace _colorSpaceFor(String classId) => switch (classId) {

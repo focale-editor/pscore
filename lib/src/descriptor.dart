@@ -399,12 +399,24 @@ final class PsOffsetValue extends PsDescriptorValue {
 
 /// An integer identifier form inside a Photoshop object reference.
 final class PsIdentifierValue extends PsDescriptorValue {
-  /// Identifier payload.
+  /// Human-readable class name in an ATN reference, including any terminal null.
+  final String name;
+
+  /// Class of the referenced object, or `null` for a bare descriptor identifier.
+  final String? classId;
+
+  /// Identifier payload: unsigned for ATN references, signed for bare values.
   final int value;
+
+  /// Whether [classId] used the compact zero-length representation.
+  final bool _compactClassId;
 
   /// Creates an identifier-reference form.
   const PsIdentifierValue({
     required this.value,
+    this.name = '',
+    this.classId,
+    this._compactClassId = true,
   });
 
   @override
@@ -413,12 +425,24 @@ final class PsIdentifierValue extends PsDescriptorValue {
 
 /// An integer index form inside a Photoshop object reference.
 final class PsIndexValue extends PsDescriptorValue {
-  /// Index payload.
+  /// Human-readable class name in an ATN reference, including any terminal null.
+  final String name;
+
+  /// Class of the referenced object, or `null` for a bare descriptor index.
+  final String? classId;
+
+  /// Index payload: unsigned for ATN references, signed for bare values.
   final int value;
+
+  /// Whether [classId] used the compact zero-length representation.
+  final bool _compactClassId;
 
   /// Creates an index-reference form.
   const PsIndexValue({
     required this.value,
+    this.name = '',
+    this.classId,
+    this._compactClassId = true,
   });
 
   @override
@@ -531,10 +555,17 @@ final class PsDescriptorDecodeOptions {
   /// Maximum aggregate number of descriptor items and list values.
   final int maxValues;
 
+  /// Whether `Idnt` and `indx` values include their reference class.
+  ///
+  /// ATN version 16 stores a Unicode class name and class identifier before
+  /// these integers. Ordinary PSD descriptors use the bare integer layout.
+  final bool integerReferencesHaveClass;
+
   /// Creates bounded options suitable for untrusted Photoshop data.
   const PsDescriptorDecodeOptions({
     this.maxDepth = 64,
     this.maxValues = 1000000,
+    this.integerReferencesHaveClass = false,
   });
 }
 
@@ -569,9 +600,12 @@ abstract final class PsDescriptorCodec {
   }) => _readDescriptor(reader, _PsDescriptorDecodeContext(options: options), 0);
 
   /// Encodes [descriptor] without an outer version or length field.
-  static Uint8List encode(PsDescriptor descriptor) {
+  ///
+  /// Set [requireIntegerReferenceClasses] for ATN version 16 output. Missing
+  /// classes then fail explicitly instead of creating an unreadable action.
+  static Uint8List encode(PsDescriptor descriptor, {bool requireIntegerReferenceClasses = false}) {
     final PsBinaryWriter writer = PsBinaryWriter();
-    _writeDescriptor(writer, descriptor);
+    _writeDescriptor(writer, descriptor, requireIntegerReferenceClasses: requireIntegerReferenceClasses);
     return writer.takeBytes();
   }
 }
@@ -644,8 +678,8 @@ PsDescriptorValue _readValue(PsBinaryReader reader, String type, _PsDescriptorDe
   'Clss' => _readReferenceClassValue(reader),
   'Enmr' => _readEnumeratedReferenceValue(reader),
   'rele' => _readOffsetValue(reader),
-  'Idnt' => PsIdentifierValue(value: reader.readInt32()),
-  'indx' => PsIndexValue(value: reader.readInt32()),
+  'Idnt' => _readIntegerReference(reader, context, identifier: true),
+  'indx' => _readIntegerReference(reader, context, identifier: false),
   'name' => _readNameValue(reader),
   'tdta' => PsRawValue(value: reader.readBytes(reader.readLength(wide: false, label: 'descriptor raw data'))),
   'alis' => PsAliasValue(value: reader.readBytes(reader.readLength(wide: false, label: 'descriptor alias'))),
@@ -685,19 +719,19 @@ PsObjectArrayValue _readObjectArrayValue(PsBinaryReader reader, _PsDescriptorDec
 }
 
 /// Writes [descriptor] without an outer version or length field.
-void _writeDescriptor(PsBinaryWriter writer, PsDescriptor descriptor) {
+void _writeDescriptor(PsBinaryWriter writer, PsDescriptor descriptor, {required bool requireIntegerReferenceClasses}) {
   _writeUnicodeString(writer, descriptor.name);
   _writeId(writer, descriptor.classId, compact: descriptor._compactClassId);
   writer.writeUint32(descriptor.items.length);
   for (final PsDescriptorItem item in descriptor.items) {
     _writeId(writer, item.key, compact: item._compactKey);
     writer.writeString(item.value.type);
-    _writeValue(writer, item.value);
+    _writeValue(writer, item.value, requireIntegerReferenceClasses: requireIntegerReferenceClasses);
   }
 }
 
 /// Writes one typed descriptor [value].
-void _writeValue(PsBinaryWriter writer, PsDescriptorValue value) {
+void _writeValue(PsBinaryWriter writer, PsDescriptorValue value, {required bool requireIntegerReferenceClasses}) {
   switch (value) {
     case PsBooleanValue():
       writer.writeUint8(value.value ? 1 : 0);
@@ -720,21 +754,21 @@ void _writeValue(PsBinaryWriter writer, PsDescriptorValue value) {
       _writeId(writer, value.typeId, compact: value._compactTypeId);
       _writeId(writer, value.value, compact: value._compactValue);
     case PsObjectValue():
-      _writeDescriptor(writer, value.value);
+      _writeDescriptor(writer, value.value, requireIntegerReferenceClasses: requireIntegerReferenceClasses);
     case PsObjectArrayValue():
       writer.writeUint32(value.itemsCount);
-      _writeDescriptor(writer, value.value);
+      _writeDescriptor(writer, value.value, requireIntegerReferenceClasses: requireIntegerReferenceClasses);
     case PsListValue():
       writer.writeUint32(value.values.length);
       for (final PsDescriptorValue item in value.values) {
         writer.writeString(item.type);
-        _writeValue(writer, item);
+        _writeValue(writer, item, requireIntegerReferenceClasses: requireIntegerReferenceClasses);
       }
     case PsReferenceValue():
       writer.writeUint32(value.values.length);
       for (final PsDescriptorValue item in value.values) {
         writer.writeString(item.type);
-        _writeValue(writer, item);
+        _writeValue(writer, item, requireIntegerReferenceClasses: requireIntegerReferenceClasses);
       }
     case PsPropertyValue():
       _writeUnicodeString(writer, value.name);
@@ -753,9 +787,9 @@ void _writeValue(PsBinaryWriter writer, PsDescriptorValue value) {
       _writeId(writer, value.classId, compact: value._compactClassId);
       writer.writeUint32(value.value);
     case PsIdentifierValue():
-      writer.writeInt32(value.value);
+      _writeIntegerReference(writer, name: value.name, classId: value.classId, compactClassId: value._compactClassId, value: value.value, requireClass: requireIntegerReferenceClasses);
     case PsIndexValue():
-      writer.writeInt32(value.value);
+      _writeIntegerReference(writer, name: value.name, classId: value.classId, compactClassId: value._compactClassId, value: value.value, requireClass: requireIntegerReferenceClasses);
     case PsNameValue():
       _writeUnicodeString(writer, value.name);
       _writeId(writer, value.classId, compact: value._compactClassId);
@@ -776,6 +810,31 @@ void _writeValue(PsBinaryWriter writer, PsDescriptorValue value) {
       _writeUnicodeString(writer, value.name);
       _writeId(writer, value.classId, compact: value._compactClassId);
   }
+}
+
+/// Reads a bare descriptor integer or a class-prefixed ATN reference.
+PsDescriptorValue _readIntegerReference(PsBinaryReader reader, _PsDescriptorDecodeContext context, {required bool identifier}) {
+  final String name = context.options.integerReferencesHaveClass ? _readUnicodeString(reader) : '';
+  final ({String value, bool compact})? classId = context.options.integerReferencesHaveClass ? _readId(reader) : null;
+  final int value = classId == null ? reader.readInt32() : reader.readUint32();
+  return identifier
+      ? PsIdentifierValue(name: name, classId: classId?.value, compactClassId: classId?.compact ?? true, value: value)
+      : PsIndexValue(name: name, classId: classId?.value, compactClassId: classId?.compact ?? true, value: value);
+}
+
+/// Writes a reference without losing the optional class or its identifier form.
+void _writeIntegerReference(PsBinaryWriter writer, {required String name, required String? classId, required bool compactClassId, required int value, required bool requireClass}) {
+  if (classId == null) {
+    if (requireClass || name.isNotEmpty) {
+      throw const PsWriteException(message: 'An ATN integer reference requires an explicit class identifier');
+    }
+  } else {
+    _writeUnicodeString(writer, name);
+    _writeId(writer, classId, compact: compactClassId);
+    writer.writeUint32(value);
+    return;
+  }
+  writer.writeInt32(value);
 }
 
 /// Reads a length-prefixed big-endian UTF-16 string.

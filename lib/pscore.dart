@@ -1,6 +1,7 @@
 /// Shared Photoshop binary primitives for format-specific Dart packages.
 library;
 
+export 'src/adjustment_settings.dart';
 export 'src/binary.dart';
 export 'src/descriptor.dart';
 export 'src/descriptor_access.dart';
