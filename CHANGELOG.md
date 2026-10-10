@@ -1,5 +1,10 @@
 # 📰 PsCore changelog
 
+## v0.2.0
+Released on October 10, 2026.
+
+* **BREAKING FEAT**: Added Black & White settings, RGBA patterns, and Photoshop-compatible PackBits encoding. ([#7c32e5f](https://github.com/focale-editor/pscore/commit/7c32e5f))
+
 ## v0.1.6
 Released on October 9, 2026.
 
