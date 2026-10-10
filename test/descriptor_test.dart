@@ -291,4 +291,23 @@ void main() {
       ).throws<PsFormatException>();
     });
   });
+
+  group('PsDescriptor', () {
+    test('withoutValue removes every item stored under a key', () {
+      const PsDescriptor descriptor = PsDescriptor(
+        name: '',
+        classId: 'null',
+        items: [
+          PsDescriptorItem(key: 'Clr ', value: PsBooleanValue(value: true)),
+          PsDescriptorItem(key: 'Opct', value: PsDoubleValue(value: 50)),
+        ],
+      );
+
+      final PsDescriptor removed = descriptor.withoutValue('Clr ');
+
+      check(removed.items.map((item) => item.key)).deepEquals(['Opct']);
+      check(removed.classId).equals('null');
+      check(identical(descriptor.withoutValue('Grad'), descriptor)).isTrue();
+    });
+  });
 }

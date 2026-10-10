@@ -333,6 +333,25 @@ void main() {
       expect(decoded.pattern.channelForSlot(0)?.sampleAt(x: 0, y: 0), 127);
     });
   });
+
+  test('creates RGBA8 patterns that encode and decode losslessly', () {
+    final Uint8List rgba = Uint8List.fromList([255, 0, 0, 255, 0, 128, 255, 64]);
+    final PsPattern pattern = PsPattern.fromRgba8(id: 'tile', name: 'Tile', width: 2, height: 1, rgba: rgba);
+
+    final Uint8List bytes = PsPatternRecordEncoder.encode(pattern: pattern, kind: PsPatternRecordKind.standalone);
+    final PsPattern decoded = PsPatternRecordDecoder.decode(
+      reader: PsBinaryReader(bytes: bytes),
+      kind: PsPatternRecordKind.standalone,
+      options: const PsPatternDecodeOptions(),
+      onIssue: (message, offset) => fail(message),
+      onDecodedBytesRequired: (bytes, offset) {},
+    ).pattern;
+
+    expect(decoded.name, 'Tile');
+    expect(decoded.width, 2);
+    expect(decoded.renderRgba8().rgba, orderedEquals(rgba));
+    expect(() => PsPattern.fromRgba8(id: 'x', name: 'x', width: 2, height: 2, rgba: rgba), throwsArgumentError);
+  });
 }
 
 /// Describes one synthetic channel used by [_record].

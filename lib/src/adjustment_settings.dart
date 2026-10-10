@@ -1,13 +1,18 @@
 import 'dart:typed_data';
 
 import 'package:pscore/src/binary.dart';
+import 'package:pscore/src/descriptor.dart';
+import 'package:pscore/src/descriptor_access.dart';
 import 'package:pscore/src/exceptions.dart';
+import 'package:pscore/src/style_resources.dart';
+import 'package:pscore/src/versioned_descriptor.dart';
 
-/// Settings of a Photoshop adjustment stored in the same binary layout in
-/// PSD adjustment layers and in standalone preset files.
+/// Settings of a Photoshop adjustment stored in the same layout in PSD
+/// adjustment layers and in standalone preset files.
 ///
 /// Levels (`levl`, `.alv`), hue/saturation (`hue2`, `.ahu`), selective color
-/// (`selc`, `.asv`), and channel mixer (`mixr`, `.cha`) share one encoding.
+/// (`selc`, `.asv`), and channel mixer (`mixr`, `.cha`) share one binary
+/// encoding; black and white (`blwh`, `.blw`) shares one Action Descriptor.
 sealed class PsAdjustmentSettings {
   /// Creates an adjustment settings base value.
   const PsAdjustmentSettings();
@@ -223,6 +228,109 @@ base class PsChannelMixer extends PsAdjustmentSettings {
   }) : trailingData = trailingData ?? Uint8List(0);
 }
 
+/// Black-and-white conversion settings, stored as an Action Descriptor.
+///
+/// The descriptor is kept whole, so unknown items round-trip; the getters
+/// read the documented ones.
+final class PsBlackAndWhite extends PsAdjustmentSettings {
+  /// Photoshop's default contribution of each colour, in percent.
+  static const ({int red, int yellow, int green, int cyan, int blue, int magenta}) defaults = (red: 40, yellow: 60, green: 40, cyan: 60, blue: 20, magenta: 80);
+
+  /// Action Descriptor version, normally 16.
+  final int version;
+
+  /// Complete settings descriptor.
+  final PsDescriptor descriptor;
+
+  /// Uninterpreted bytes following the descriptor.
+  final Uint8List trailingData;
+
+  /// Wraps a decoded settings [descriptor].
+  PsBlackAndWhite({required this.descriptor, this.version = 16, Uint8List? trailingData}) : trailingData = trailingData ?? Uint8List(0);
+
+  /// Creates settings the way Photoshop's dialog writes them.
+  ///
+  /// [presetKind] is Photoshop's `bwPresetKind`: 1 for the default, 2 for a
+  /// custom setting, 3 for a preset loaded from a file.
+  factory PsBlackAndWhite.create({
+    int red = 40,
+    int yellow = 60,
+    int green = 40,
+    int cyan = 60,
+    int blue = 20,
+    int magenta = 80,
+    bool useTint = false,
+    PsColor? tintColor,
+    int presetKind = 2,
+    String presetFileName = '',
+  }) {
+    PsDescriptorItem long(String key, int value) => PsDescriptorItem(
+      key: key,
+      value: PsIntegerValue(value: value),
+    );
+    return PsBlackAndWhite(
+      descriptor: PsDescriptor(
+        name: '',
+        classId: 'null',
+        items: [
+          long('Rd  ', red),
+          long('Yllw', yellow),
+          long('Grn ', green),
+          long('Cyn ', cyan),
+          long('Bl  ', blue),
+          long('Mgnt', magenta),
+          PsDescriptorItem(
+            key: 'useTint',
+            value: PsBooleanValue(value: useTint),
+          ),
+          PsDescriptorItem(
+            key: 'tintColor',
+            value: PsObjectValue(value: (tintColor ?? PsColor.rgb(red: 225, green: 211, blue: 179)).descriptor),
+          ),
+          long('bwPresetKind', presetKind),
+          PsDescriptorItem(
+            key: 'blackAndWhitePresetFileName',
+            value: PsStringValue(value: presetFileName),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Contribution of reds to the gray value, in percent.
+  int get red => descriptor.integerValue('Rd  ') ?? defaults.red;
+
+  /// Contribution of yellows, in percent.
+  int get yellow => descriptor.integerValue('Yllw') ?? defaults.yellow;
+
+  /// Contribution of greens, in percent.
+  int get green => descriptor.integerValue('Grn ') ?? defaults.green;
+
+  /// Contribution of cyans, in percent.
+  int get cyan => descriptor.integerValue('Cyn ') ?? defaults.cyan;
+
+  /// Contribution of blues, in percent.
+  int get blue => descriptor.integerValue('Bl  ') ?? defaults.blue;
+
+  /// Contribution of magentas, in percent.
+  int get magenta => descriptor.integerValue('Mgnt') ?? defaults.magenta;
+
+  /// Whether the result is tinted with [tintColor].
+  bool get useTint => descriptor.booleanValue('useTint') ?? false;
+
+  /// Tint colour, when stored.
+  PsColor? get tintColor => switch (descriptor.value('tintColor')) {
+    PsObjectValue(:final PsDescriptor value) => PsColor.fromDescriptor(value),
+    _ => null,
+  };
+
+  /// Photoshop's `bwPresetKind`, when stored.
+  int? get presetKind => descriptor.integerValue('bwPresetKind');
+
+  /// File the settings were loaded from, when stored.
+  String? get presetFileName => descriptor.stringValue('blackAndWhitePresetFileName');
+}
+
 /// Reads and writes the binary adjustment settings shared by PSD blocks and preset files.
 ///
 /// Readers consume the whole remaining input, keeping unrecognized bytes in
@@ -387,8 +495,22 @@ abstract final class PsAdjustmentSettingsCodec {
         writeSelectiveColor(writer, settings);
       case PsChannelMixer():
         writeChannelMixer(writer, settings);
+      case PsBlackAndWhite():
+        writeBlackAndWhite(writer, settings);
     }
     return writer.takeBytes();
+  }
+
+  /// Reads black-and-white settings: a versioned Action Descriptor.
+  static PsBlackAndWhite readBlackAndWhite(PsBinaryReader reader, {PsDescriptorDecodeOptions options = const PsDescriptorDecodeOptions()}) {
+    final PsVersionedDescriptor value = PsVersionedDescriptorCodec.read(reader, options: options);
+    return PsBlackAndWhite(descriptor: value.descriptor, version: value.version, trailingData: reader.readBytes(reader.remaining));
+  }
+
+  /// Writes black-and-white settings.
+  static void writeBlackAndWhite(PsBinaryWriter writer, PsBlackAndWhite settings) {
+    PsVersionedDescriptorCodec.write(writer, PsVersionedDescriptor(version: settings.version, descriptor: settings.descriptor));
+    writer.writeBytes(settings.trailingData);
   }
 
   /// Reads one levels channel record.

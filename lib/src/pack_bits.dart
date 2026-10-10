@@ -6,9 +6,13 @@ import 'package:pscore/src/exceptions.dart';
 /// Encodes and decodes the PackBits run-length format used by Photoshop.
 abstract final class PsPackBitsCodec {
   /// Decodes one PackBits [input] row into exactly [decodedLength] bytes.
+  ///
+  /// With [allowTrailingInput], bytes left once the row is complete are
+  /// ignored, as some non-Adobe writers pad rows that way.
   static Uint8List decodeRow(
     Uint8List input, {
     required int decodedLength,
+    bool allowTrailingInput = false,
   }) {
     if (decodedLength < 0) {
       throw const PsFormatException(message: 'A PackBits row cannot have a negative decoded length');
@@ -35,9 +39,16 @@ abstract final class PsPackBitsCodec {
         outputOffset += count;
       }
     }
-    if (inputOffset != input.length || outputOffset != decodedLength) {
+    if (outputOffset != decodedLength) {
       throw PsFormatException(
         message: 'PackBits row decoded to $outputOffset bytes; expected $decodedLength',
+        source: input,
+        offset: inputOffset,
+      );
+    }
+    if (inputOffset != input.length && !allowTrailingInput) {
+      throw PsFormatException(
+        message: 'PackBits row has ${input.length - inputOffset} unused bytes after its $decodedLength decoded bytes',
         source: input,
         offset: inputOffset,
       );
@@ -63,32 +74,33 @@ abstract final class PsPackBitsCodec {
   /// [start]. Writing into a caller-owned buffer lets a whole image be encoded
   /// without allocating per row or per run, which dominates the cost of
   /// compressing large planes.
+  ///
+  /// The output matches Photoshop byte for byte: the row is split into
+  /// independent 128-byte segments, a run of two or more equal bytes is
+  /// repeated when it starts a packet, and a literal packet only stops before
+  /// a run of three or more.
   static int encodeRowInto(Uint8List row, Uint8List output, int start) {
     int write = start;
-    int offset = 0;
-    while (offset < row.length) {
-      int runLength = _repeatedRunLength(row, offset);
-      if (runLength >= 3) {
-        output[write++] = 257 - runLength;
-        output[write++] = row[offset];
-        offset += runLength;
-        continue;
-      }
-
-      final int literalStart = offset;
-      offset += runLength;
-      while (offset < row.length && offset - literalStart < 128) {
-        runLength = _repeatedRunLength(row, offset);
-        if (runLength >= 3) {
-          break;
+    for (int segment = 0; segment < row.length; segment += 128) {
+      final int end = segment + 128 < row.length ? segment + 128 : row.length;
+      int offset = segment;
+      while (offset < end) {
+        final int runLength = _repeatedRunLength(row, offset, end);
+        if (runLength >= 2) {
+          output[write++] = 257 - runLength;
+          output[write++] = row[offset];
+          offset += runLength;
+          continue;
         }
-        final int remaining = 128 - (offset - literalStart);
-        offset += runLength.clamp(1, remaining);
+        final int literalStart = offset;
+        while (offset < end && _repeatedRunLength(row, offset, end) < 3) {
+          offset++;
+        }
+        final int literalLength = offset - literalStart;
+        output[write++] = literalLength - 1;
+        output.setRange(write, write + literalLength, row, literalStart);
+        write += literalLength;
       }
-      final int literalLength = offset - literalStart;
-      output[write++] = literalLength - 1;
-      output.setRange(write, write + literalLength, row, literalStart);
-      write += literalLength;
     }
     return write;
   }
@@ -99,12 +111,14 @@ abstract final class PsPackBitsCodec {
     required int rowBytes,
     required int rowCount,
     bool wideRowLengths = false,
+    bool allowTrailingInput = false,
   }) {
     final ({Uint8List data, int bytesRead}) decoded = decodeRowsPrefix(
       input,
       rowBytes: rowBytes,
       rowCount: rowCount,
       wideRowLengths: wideRowLengths,
+      allowTrailingInput: allowTrailingInput,
     );
     if (decoded.bytesRead != input.length) {
       throw PsFormatException(
@@ -122,6 +136,7 @@ abstract final class PsPackBitsCodec {
     required int rowBytes,
     required int rowCount,
     bool wideRowLengths = false,
+    bool allowTrailingInput = false,
   }) {
     final PsBinaryReader reader = PsBinaryReader(bytes: input);
     final Uint8List data = decodeRowsReader(
@@ -129,16 +144,20 @@ abstract final class PsPackBitsCodec {
       rowBytes: rowBytes,
       rowCount: rowCount,
       wideRowLengths: wideRowLengths,
+      allowTrailingInput: allowTrailingInput,
     );
     return (data: data, bytesRead: reader.offset);
   }
 
   /// Decodes table-prefixed rows at the current [reader] position.
+  ///
+  /// [allowTrailingInput] applies [decodeRow]'s tolerance to every row.
   static Uint8List decodeRowsReader(
     PsBinaryReader reader, {
     required int rowBytes,
     required int rowCount,
     bool wideRowLengths = false,
+    bool allowTrailingInput = false,
   }) {
     _validateDecodedRowGeometry(rowBytes, rowCount);
     final List<int> lengths = <int>[];
@@ -150,6 +169,7 @@ abstract final class PsPackBitsCodec {
       final Uint8List decoded = decodeRow(
         reader.readView(lengths[row]),
         decodedLength: rowBytes,
+        allowTrailingInput: allowTrailingInput,
       );
       output.setRange(row * rowBytes, (row + 1) * rowBytes, decoded);
     }
@@ -198,10 +218,12 @@ abstract final class PsPackBitsCodec {
     return outputOffset * 2 < output.length ? Uint8List.fromList(result) : result;
   }
 
-  /// Returns the repeated run at [offset], capped to PackBits' maximum.
-  static int _repeatedRunLength(Uint8List row, int offset) {
+  /// Returns the run of bytes equal to `row[offset]` that ends before [end].
+  ///
+  /// Segments hold at most 128 bytes, so the run never exceeds a packet.
+  static int _repeatedRunLength(Uint8List row, int offset, int end) {
     int length = 1;
-    while (offset + length < row.length && length < 128 && row[offset + length] == row[offset]) {
+    while (offset + length < end && row[offset + length] == row[offset]) {
       length++;
     }
     return length;

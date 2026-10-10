@@ -399,7 +399,7 @@ final class PsLayerEffect {
   /// Visual size stored as `blur` or stroke-specific `Sz  `.
   PsDescriptorNumber? get size => descriptor.numberValue('blur') ?? descriptor.numberValue('Sz  ');
 
-  /// Shadow or glow choke/spread stored under `Ckmt`.
+  /// Shadow or glow choke/spread stored under `Ckmt`, a percentage of the size despite its pixel unit.
   PsDescriptorNumber? get chokeOrSpread => descriptor.numberValue('Ckmt');
 
   /// Effect noise stored under `Nose`, when applicable.

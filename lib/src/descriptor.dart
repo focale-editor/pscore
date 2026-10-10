@@ -55,6 +55,24 @@ final class PsDescriptor {
     }
     return PsDescriptor(name: name, classId: classId, items: updated, compactClassId: _compactClassId);
   }
+
+  /// Returns a copy without any item stored under [key].
+  ///
+  /// Returns this descriptor when it has no such item.
+  PsDescriptor withoutValue(String key) {
+    if (!items.any((item) => item.key == key)) {
+      return this;
+    }
+    return PsDescriptor(
+      name: name,
+      classId: classId,
+      items: [
+        for (final PsDescriptorItem item in items)
+          if (item.key != key) item,
+      ],
+      compactClassId: _compactClassId,
+    );
+  }
 }
 
 /// One keyed value inside a Photoshop action descriptor.

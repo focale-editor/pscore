@@ -435,6 +435,72 @@ final class PsPattern {
        recordTrailingData = Uint8List.fromList(recordTrailingData).asUnmodifiableView(),
        recordData = recordData == null ? null : Uint8List.fromList(recordData).asUnmodifiableView();
 
+  /// Creates a lossless RGB pattern from straight-alpha RGBA8 [rgba] pixels.
+  ///
+  /// The planes follow Photoshop's layout: 24 ordinary channel slots, of which
+  /// the first three hold red, green, and blue, then the user mask and the
+  /// transparency slot. Channels are PackBits-compressed when encoded.
+  factory PsPattern.fromRgba8({
+    required String id,
+    required String name,
+    required int width,
+    required int height,
+    required Uint8List rgba,
+  }) {
+    if (width <= 0 || height <= 0 || rgba.length != width * height * 4) {
+      throw ArgumentError('A $width × $height RGBA8 pattern needs ${width * height * 4} bytes, not ${rgba.length}');
+    }
+    final int pixelCount = width * height;
+    final List<Uint8List> planes = List.generate(4, (_) => Uint8List(pixelCount));
+    for (int pixel = 0; pixel < pixelCount; pixel++) {
+      for (int component = 0; component < 4; component++) {
+        planes[component][pixel] = rgba[pixel * 4 + component];
+      }
+    }
+    final PsRectangle bounds = PsRectangle(top: 0, left: 0, bottom: height, right: width);
+    const int channelCount = 24;
+    return PsPattern(
+      version: 1,
+      colorMode: PsPatternColorMode.rgb,
+      colorModeCode: PsPatternColorMode.rgb.code,
+      vertical: height,
+      horizontal: width,
+      name: name,
+      id: id,
+      idData: Uint8List(0),
+      palette: null,
+      indexedMetadata: null,
+      virtualMemoryVersion: 3,
+      bounds: bounds,
+      declaredChannelCount: channelCount,
+      slots: [
+        for (int index = 0; index < channelCount + 2; index++)
+          if (index < 3 || index == channelCount + 1)
+            PsPatternChannelSlot(
+              index: index,
+              writtenCode: 1,
+              declaredLength: null,
+              data: Uint8List(0),
+              channel: PsPatternChannel(
+                primaryDepth: 8,
+                depth: 8,
+                bounds: bounds,
+                compression: PsPatternCompression.packBits,
+                compressionCode: PsPatternCompression.packBits.code,
+                encodedData: Uint8List(0),
+                decodedData: planes[index < 3 ? index : 3],
+                trailingData: Uint8List(0),
+              ),
+            )
+          else
+            PsPatternChannelSlot(index: index, writtenCode: 0, declaredLength: null, data: Uint8List(0), channel: null),
+      ],
+      virtualMemoryTrailingData: Uint8List(0),
+      recordTrailingData: Uint8List(0),
+      recordData: null,
+    );
+  }
+
   /// Tile width reported by the point field, with the VMA width as a fallback.
   int get width => horizontal > 0 ? horizontal : bounds.width;
 

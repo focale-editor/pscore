@@ -161,4 +161,23 @@ void main() {
       );
     });
   });
+
+  test('tolerates bytes after a complete row only when asked', () {
+    final Uint8List padded = Uint8List.fromList([0xfe, 7, 0x80, 0]);
+
+    expect(() => PsPackBitsCodec.decodeRow(padded, decodedLength: 3), throwsA(isA<PsFormatException>().having((error) => error.message, 'message', contains('2 unused bytes'))));
+    expect(PsPackBitsCodec.decodeRow(padded, decodedLength: 3, allowTrailingInput: true), orderedEquals(<int>[7, 7, 7]));
+  });
+
+  test('encodes rows byte for byte as Photoshop does', () {
+    // Taken from a Photoshop PAT preset: a two-byte run starting a packet is
+    // repeated, while one inside a literal stays literal.
+    final Uint8List row = Uint8List.fromList([124, 124, 124, 125, 125, 126, 127, 127, ...List<int>.filled(40, 0)]);
+    // A 130-byte run splits at the 128-byte segment boundary.
+    final Uint8List long = Uint8List.fromList(List<int>.filled(130, 9));
+
+    expect(PsPackBitsCodec.encodeRow(row), orderedEquals(<int>[254, 124, 255, 125, 2, 126, 127, 127, 217, 0]));
+    expect(PsPackBitsCodec.encodeRow(long), orderedEquals(<int>[129, 9, 255, 9]));
+    expect(PsPackBitsCodec.decodeRow(PsPackBitsCodec.encodeRow(row), decodedLength: row.length), orderedEquals(row));
+  });
 }

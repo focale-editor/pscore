@@ -72,4 +72,21 @@ void main() {
       check(PsLevels.identity().records).length.equals(29);
     });
   });
+
+  group('PsBlackAndWhite', () {
+    test('round-trips its descriptor and reads every documented value', () {
+      final PsBlackAndWhite source = PsBlackAndWhite.create(red: -30, yellow: 110, green: 40, cyan: 60, blue: 110, magenta: 110, useTint: true, presetKind: 3, presetFileName: 'Blue Filter');
+
+      final Uint8List bytes = PsAdjustmentSettingsCodec.encode(source);
+      final PsBlackAndWhite decoded = PsAdjustmentSettingsCodec.readBlackAndWhite(PsBinaryReader(bytes: bytes));
+
+      check(decoded.version).equals(16);
+      check([decoded.red, decoded.yellow, decoded.green, decoded.cyan, decoded.blue, decoded.magenta]).deepEquals([-30, 110, 40, 60, 110, 110]);
+      check(decoded.useTint).isTrue();
+      check(decoded.tintColor?.toRgb()?.red).equals(225);
+      check(decoded.presetKind).equals(3);
+      check(decoded.presetFileName).equals('Blue Filter');
+      check(PsAdjustmentSettingsCodec.encode(decoded)).deepEquals(bytes);
+    });
+  });
 }
