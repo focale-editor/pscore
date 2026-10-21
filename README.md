@@ -27,16 +27,19 @@ The package currently provides:
 The package is pure Dart and runs on native platforms, WebAssembly, and
 JavaScript.
 
-Only the JavaScript target needs a compromise: it has no 64-bit integers, and its
-`ByteData` 64-bit accessors are unavailable. There, `PsCore` composes each 64-bit
-field from two 32-bit halves, which is exact up to `psMaxExactInteger`, or two to
-the power of 53 minus one. A `comp` descriptor value is an arbitrary signed
-integer, so some valid values exceed this JavaScript limit even in small files.
-Beyond the exact range, reading raises a `PsFormatException` and writing a
-`PsWriteException`, rather than silently dropping the low bits.
+`comp` Action Descriptor values retain every signed 64-bit integer on all
+three targets. Read `PsLargeIntegerValue.exactValue` as a `BigInt`, or construct
+one with `PsLargeIntegerValue.fromBigInt(value: value)`. The existing const
+integer constructor remains available. `intValue` is nullable when the target
+cannot represent a value exactly; the compatibility `value` getter throws
+`StateError` in that case instead of rounding it. Integer descriptor projections
+also return `null` for an unrepresentable value.
 
-Native and WebAssembly targets both use the platform's own 64-bit accessors and
-produce byte-identical output over the full signed 64-bit range.
+`PsBinaryReader.readBigInt64` and `PsBinaryWriter.writeBigInt64` provide the same
+exact signed range for other binary structures. Ordinary `readInt64`/`writeInt64`
+and 64-bit length fields continue to use `int`; JavaScript rejects values beyond
+`psMaxExactInteger` for those APIs. Native and WebAssembly integer APIs retain
+the platform's signed 64-bit range.
 
 ## Usage
 

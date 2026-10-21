@@ -56,14 +56,14 @@ extension PsDescriptorValueAccess on PsDescriptorValue? {
   bool? asBoolean({PsDescriptorAccessMode mode = PsDescriptorAccessMode.strict}) => switch (this) {
     PsBooleanValue(:final bool value) => value,
     PsIntegerValue(:final int value) when mode == PsDescriptorAccessMode.compatible => value != 0,
-    PsLargeIntegerValue(:final int value) when mode == PsDescriptorAccessMode.compatible => value != 0,
+    PsLargeIntegerValue(:final BigInt exactValue) when mode == PsDescriptorAccessMode.compatible => exactValue != BigInt.zero,
     _ => null,
   };
 
   /// Returns this value as an integer.
   int? asInteger({PsDescriptorAccessMode mode = PsDescriptorAccessMode.strict}) => switch (this) {
     PsIntegerValue(:final int value) => value,
-    PsLargeIntegerValue(:final int value) => value,
+    PsLargeIntegerValue(:final int? intValue) => intValue,
     PsDoubleValue(:final double value) when mode == PsDescriptorAccessMode.compatible => value.round(),
     PsUnitFloatValue(:final double value) when mode == PsDescriptorAccessMode.compatible => value.round(),
     _ => null,
@@ -72,7 +72,7 @@ extension PsDescriptorValueAccess on PsDescriptorValue? {
   /// Returns this value as a number with its optional unit.
   PsDescriptorNumber? asNumber() => switch (this) {
     PsIntegerValue(:final int value) => PsDescriptorNumber(value: value.toDouble(), unit: null),
-    PsLargeIntegerValue(:final int value) => PsDescriptorNumber(value: value.toDouble(), unit: null),
+    PsLargeIntegerValue(:final BigInt exactValue) => PsDescriptorNumber(value: exactValue.toDouble(), unit: null),
     PsDoubleValue(:final double value) => PsDescriptorNumber(value: value, unit: null),
     PsUnitFloatValue(:final String unit, :final double value) => PsDescriptorNumber(value: value, unit: unit),
     _ => null,

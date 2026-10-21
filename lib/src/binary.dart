@@ -100,6 +100,13 @@ final class PsBinaryReader {
     return value;
   }
 
+  /// Reads a signed 64-bit integer exactly on every platform, including JavaScript.
+  BigInt readBigInt64() {
+    final int high = readInt32();
+    final int low = readUint32();
+    return (BigInt.from(high) << 32) + BigInt.from(low);
+  }
+
   /// Reads a big-endian single-precision floating-point value.
   double readFloat32() {
     _require(4);
@@ -263,6 +270,17 @@ final class PsBinaryWriter {
       throw PsWriteException(message: 'Cannot write $value as a signed 64-bit field: $_inexactWriteMessage');
     }
     _length += 8;
+  }
+
+  /// Writes a signed 64-bit integer without narrowing it to a platform integer.
+  void writeBigInt64(BigInt value) {
+    final BigInt limit = BigInt.one << 63;
+    if (value < -limit || value >= limit) {
+      throw const PsWriteException(message: 'Descriptor integer is outside the signed 64-bit range');
+    }
+    final BigInt mask = (BigInt.one << 32) - BigInt.one;
+    writeUint32(((value >> 32) & mask).toInt());
+    writeUint32((value & mask).toInt());
   }
 
   /// Writes a big-endian single-precision floating-point value.

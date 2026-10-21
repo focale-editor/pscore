@@ -579,7 +579,7 @@ final class PsGradient {
   /// Extracts every integer value from an optional descriptor list.
   static List<int> _integers(List<PsDescriptorValue>? values) => [
     for (final PsDescriptorValue value in values ?? const <PsDescriptorValue>[])
-      if (value case PsIntegerValue(:final int value)) value else if (value case PsLargeIntegerValue(:final int value)) value,
+      if (value.asInteger() case final int integer) integer,
   ];
 }
 

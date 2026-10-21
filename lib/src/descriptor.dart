@@ -131,15 +131,41 @@ final class PsIntegerValue extends PsDescriptorValue {
   String get type => 'long';
 }
 
-/// A signed 64-bit descriptor integer.
+/// A signed 64-bit descriptor integer, preserved exactly on all platforms.
 final class PsLargeIntegerValue extends PsDescriptorValue {
-  /// Integer payload.
-  final int value;
+  /// Payload supplied through the backwards-compatible integer constructor.
+  final int? _integer;
+
+  /// Full-precision payload supplied by a decoder or an exact-value caller.
+  final BigInt? _exact;
 
   /// Creates a large-integer descriptor value.
-  const PsLargeIntegerValue({
-    required this.value,
-  });
+  const PsLargeIntegerValue({required int value}) : _integer = value, _exact = null;
+
+  /// Creates an exact value, including values outside JavaScript's integer range.
+  PsLargeIntegerValue.fromBigInt({required BigInt value}) : _integer = null, _exact = value {
+    final BigInt limit = BigInt.one << 63;
+    if (value < -limit || value >= limit) {
+      throw RangeError('Descriptor integer is outside the signed 64-bit range');
+    }
+  }
+
+  /// Exact signed payload, including on JavaScript targets.
+  BigInt get exactValue => _exact ?? BigInt.from(_integer!);
+
+  /// Payload as an integer when the current platform can represent it exactly.
+  int? get intValue {
+    if (_integer case final int value) {
+      return value;
+    }
+    final int value = _exact!.toInt();
+    return BigInt.from(value) == _exact ? value : null;
+  }
+
+  /// Backwards-compatible integer access, throwing rather than rounding on Web.
+  ///
+  /// Use [exactValue] for platform-independent access to every `comp` value.
+  int get value => intValue ?? (throw StateError('Use exactValue for this 64-bit descriptor integer'));
 
   @override
   String get type => 'comp';
@@ -681,7 +707,7 @@ PsDescriptor _readDescriptor(PsBinaryReader reader, _PsDescriptorDecodeContext c
 PsDescriptorValue _readValue(PsBinaryReader reader, String type, _PsDescriptorDecodeContext context, int depth) => switch (type) {
   'bool' => PsBooleanValue(value: reader.readUint8() != 0),
   'long' => PsIntegerValue(value: reader.readInt32()),
-  'comp' => PsLargeIntegerValue(value: reader.readInt64()),
+  'comp' => PsLargeIntegerValue.fromBigInt(value: reader.readBigInt64()),
   'doub' => PsDoubleValue(value: reader.readFloat64()),
   'UntF' => PsUnitFloatValue(unit: reader.readString(4), value: reader.readFloat64()),
   'UnFl' => _readUnitFloatsValue(reader, context),
@@ -756,7 +782,7 @@ void _writeValue(PsBinaryWriter writer, PsDescriptorValue value, {required bool 
     case PsIntegerValue():
       writer.writeInt32(value.value);
     case PsLargeIntegerValue():
-      writer.writeInt64(value.value);
+      writer.writeBigInt64(value.exactValue);
     case PsDoubleValue():
       writer.writeFloat64(value.value);
     case PsUnitFloatValue():
