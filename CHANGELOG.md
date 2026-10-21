@@ -1,5 +1,11 @@
 # 📰 PsCore changelog
 
+## v0.2.1
+Released on October 22, 2026.
+
+* **FEAT**: Added floating RGB color descriptors (`redFloat`, `greenFloat`, `blueFloat`). ([#a413ee7](https://github.com/focale-editor/pscore/commit/a413ee7))
+* **FEAT**: Preserved full signed 64-bit descriptor integers on the Web. ([#5ee8317](https://github.com/focale-editor/pscore/commit/5ee8317))
+
 ## v0.2.0
 Released on October 10, 2026.
 
