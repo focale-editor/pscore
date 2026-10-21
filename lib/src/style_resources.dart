@@ -105,6 +105,17 @@ final class PsColor {
     ),
   );
 
+  /// Creates an `RGBC` color from floating components from 0 through 1.
+  ///
+  /// Unlike [PsColor.rgb], the components may exceed 1 or be negative, as
+  /// recent Photoshop versions store them for wide or high dynamic range
+  /// colors. See [red].
+  factory PsColor.rgbFloat({
+    required double red,
+    required double green,
+    required double blue,
+  }) => PsColor._create('RGBC', {'redFloat': red, 'greenFloat': green, 'blueFloat': blue});
+
   /// Creates a `CMYC` color from ink coverages in percent.
   factory PsColor.cmyk({
     required double cyan,
@@ -133,7 +144,7 @@ final class PsColor {
   /// Creates a typed view over a Photoshop color [descriptor].
   factory PsColor.fromDescriptor(PsDescriptor descriptor) {
     final List<String> componentKeys = switch (descriptor.classId) {
-      'RGBC' || 'RGBColor' => const ['Rd  ', 'Grn ', 'Bl  ', 'red', 'green', 'blue'],
+      'RGBC' || 'RGBColor' => const ['Rd  ', 'Grn ', 'Bl  ', 'red', 'green', 'blue', 'redFloat', 'greenFloat', 'blueFloat'],
       'CMYC' || 'CMYKColor' => const ['Cyn ', 'Mgnt', 'Ylw ', 'Blck', 'cyan', 'magenta', 'yellowColor', 'black'],
       'Grsc' || 'grayscale' => const ['Gry ', 'gray'],
       'HSBC' || 'HSBColor' => const ['H   ', 'Strt', 'Brgh', 'hue', 'saturation', 'brightness'],
@@ -166,13 +177,33 @@ final class PsColor {
   PsDescriptorNumber? component(String key) => components[key];
 
   /// Red component in the 0–255 range, when this is an RGB color.
-  double? get red => (components['Rd  '] ?? components['red'])?.value;
+  ///
+  /// Recent Photoshop versions may store floating components instead
+  /// (`redFloat`, `greenFloat` and `blueFloat`), from 0 through 1 in the same
+  /// encoding; they are scaled to this range and may fall outside it, since
+  /// they can exceed 1 or be negative.
+  double? get red => _rgb('Rd  ', 'red', 'redFloat');
 
   /// Green component in the 0–255 range, when this is an RGB color.
-  double? get green => (components['Grn '] ?? components['green'])?.value;
+  ///
+  /// See [red] for floating components.
+  double? get green => _rgb('Grn ', 'green', 'greenFloat');
 
   /// Blue component in the 0–255 range, when this is an RGB color.
-  double? get blue => (components['Bl  '] ?? components['blue'])?.value;
+  ///
+  /// See [red] for floating components.
+  double? get blue => _rgb('Bl  ', 'blue', 'blueFloat');
+
+  /// Whether the RGB components are stored as floating values from 0 to 1.
+  bool get hasFloatRgb => components.containsKey('redFloat');
+
+  /// Reads one RGB component under its short, long or floating key.
+  double? _rgb(String short, String long, String floating) =>
+      (components[short] ?? components[long])?.value ??
+      switch (components[floating]?.value) {
+        final double value => value * 255,
+        null => null,
+      };
 
   /// Approximates this color in sRGB, with components in the 0–255 range.
   ///

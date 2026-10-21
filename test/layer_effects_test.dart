@@ -15,6 +15,28 @@ void main() {
       check(color.blue).equals(30);
     });
 
+    test('reads floating RGB components, which may leave the 0–1 range', () {
+      final PsColor color = PsColor.fromDescriptor(
+        const PsDescriptor(
+          name: '',
+          classId: 'RGBC',
+          items: [
+            PsDescriptorItem(key: 'redFloat', value: PsDoubleValue(value: 0.5)),
+            PsDescriptorItem(key: 'greenFloat', value: PsDoubleValue(value: 1.25)),
+            PsDescriptorItem(key: 'blueFloat', value: PsDoubleValue(value: -0.1)),
+          ],
+        ),
+      );
+
+      check(color.hasFloatRgb).isTrue();
+      check(color.red).equals(127.5);
+      check(color.green).equals(318.75);
+      check(color.blue!).isCloseTo(-25.5, 1e-9);
+      check(color.toRgb()).isNotNull();
+      check(PsColor.rgb(red: 1, green: 2, blue: 3).hasFloatRgb).isFalse();
+      check(PsColor.rgbFloat(red: 0.5, green: 1.25, blue: -0.1).descriptor.value('blueFloat')).isA<PsDoubleValue>().has((value) => value.value, 'value').equals(-0.1);
+    });
+
     test('creates every process color space and approximates it in sRGB', () {
       final List<PsColor> colors = [
         PsColor.cmyk(cyan: 0, magenta: 100, yellow: 100, black: 0),
