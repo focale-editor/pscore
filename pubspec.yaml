@@ -1,6 +1,6 @@
 name: pscore
 description: Shared binary, descriptor, text-engine, PackBits, and pattern codecs for Adobe file formats.
-version: 0.2.1
+version: 0.2.2
 homepage: https://github.com/focale-editor/pscore
 repository: https://github.com/focale-editor/pscore
 

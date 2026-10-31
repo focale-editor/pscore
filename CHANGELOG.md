@@ -1,5 +1,10 @@
 # 📰 PsCore changelog
 
+## v0.2.2
+Released on October 31, 2026.
+
+* **FEAT**: Added shared Adobe text-engine codecs. ([#b6dcca0](https://github.com/focale-editor/pscore/commit/b6dcca0))
+
 ## v0.2.1
 Released on October 22, 2026.
 
