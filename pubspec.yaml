@@ -1,5 +1,5 @@
 name: pscore
-description: Shared binary, descriptor, PackBits, and pattern codecs for Photoshop file formats.
+description: Shared binary, descriptor, text-engine, PackBits, and pattern codecs for Adobe file formats.
 version: 0.2.1
 homepage: https://github.com/focale-editor/pscore
 repository: https://github.com/focale-editor/pscore

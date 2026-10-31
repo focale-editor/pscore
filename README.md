@@ -4,7 +4,7 @@
 
 # PsCore
 
-PsCore contains the pure Dart binary primitives shared by Focale's Photoshop format packages. It prevents AbrKit, AcvKit, AslKit, CshKit, PatKit and PsdKit from maintaining subtly different implementations of the same codecs.
+PsCore contains the pure Dart binary primitives shared by Focale's Adobe format packages. It prevents AbrKit, AcvKit, AiKit, AslKit, CshKit, PatKit and PsdKit from maintaining subtly different implementations of the same codecs.
 
 The package currently provides:
 
@@ -12,6 +12,7 @@ The package currently provides:
 - a complete Photoshop Action Descriptor model, reader, and writer;
 - every standard descriptor OSType and object-reference form;
 - bounded descriptor depth and value counts for untrusted input;
+- immutable Adobe EngineData/ATE values, bounded parsing and source-preserving edits;
 - PackBits row encoding and decoding;
 - a shared Photoshop pattern-record model, bounded decoder, and encoder;
 - raw and PackBits pattern planes at 1, 8, 16, and 32 bits;
@@ -56,6 +57,31 @@ final PsDescriptorValue? name = descriptor.value('Nm  ');
 
 final Uint8List encoded = PsDescriptorCodec.encode(descriptor);
 ```
+
+Adobe text-engine payloads use binary literal strings: raw CR/LF bytes must not
+be normalized as ordinary PostScript whitespace. The shared codec preserves
+those bytes, supports BOM-marked UTF-16, and retains unknown atoms and original
+number spellings. It accepts wrapped dictionaries and ATE/Txt2 bare dictionaries.
+
+```dart
+final PsEngineDocument engine = PsEngineDocument.decode(bytes: engineBytes);
+final PsEngineDictionary root = engine.root as PsEngineDictionary;
+final PsEngineDocument changed = engine.replaceValues(
+  replacements: {
+    root['Name']!: PsEngineString.fromText(text: 'Body text'),
+  },
+);
+```
+
+Source edits require handles from the same snapshot and reject overlaps.
+`PsEngineLimits` bounds bytes, strings, nodes and nesting for reading and writing.
+Duplicate keys are rejected by default; legacy adapters may explicitly select
+`PsEngineReader(allowDuplicateKeys: true)`. `PsEngineReader.view` borrows a typed
+buffer for short-lived scans; its caller must not mutate the input while reading.
+Parsed values and `PsEngineDocument` snapshots own their data. Integers outside
+the exact JavaScript range are preserved as `PsEngineToken`, without rounding.
+This grammar codec does not shape text or synchronize format-specific runs,
+frames, glyph caches or rendered artwork; container packages own those rules.
 
 Container packages can reuse the pattern-record decoder while controlling source preservation and decoded-memory limits:
 
